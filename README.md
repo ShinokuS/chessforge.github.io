@@ -1,39 +1,22 @@
 # Chessforge
 
-Браузерная шахматно-коллекционная игра: колоды с модификациями фигур, бой с ИИ и онлайн по ссылке-приглашению.
+Браузерная шахматно-коллекционная игра: колоды с модификациями, бой с ИИ и онлайн по коду комнаты.
 
-## Стек
-
-- `@chessforge/engine` — правила
-- `@chessforge/ai` — поиск хода и сборка колоды ИИ
-- `@chessforge/client` — Vite + React (GitHub Pages)
-
-Онлайн — **PeerJS / WebRTC** (отдельный игровой сервер не нужен).
-
-## Локальный запуск
+## Запуск
 
 ```bash
 pnpm install
-unset VITE_BASE
 pnpm dev
 ```
 
 Откройте `http://127.0.0.1:5173/`.
 
-## Деплой на GitHub Pages (важно)
+## Онлайн
 
-Сайт собирается в ветку **`gh-pages`**. Один раз настройте Pages:
+**Бой → Онлайн** → выберите свою колоду → **Создать комнату**. На доске появится код — передайте его сопернику. Соперник выбирает **свою** колоду, вводит код и жмёт **Войти**.
 
-1. Репозиторий → **Settings → Pages**
-2. **Build and deployment → Source**: **Deploy from a branch**
-3. **Branch**: `gh-pages` / folder `/ (root)` → Save
+Связь peer-to-peer (PeerJS). Для GitHub Pages в некоторых сетях нужен VPN.
 
-После пуша в `main` workflow **Deploy GitHub Pages** соберёт клиент и обновит `gh-pages`.
+## Деплой (GitHub Pages)
 
-Адрес проекта:
-
-`https://<user>.github.io/<имя-репозитория>/`
-
-Для этого репо: **https://ShinokuS.github.io/chessforge.github.io/**
-
-> Если открывается «документация» Jekyll / README вместо игры — Pages всё ещё смотрит на ветку `main`. Переключите source на `gh-pages`, как выше.
+Workflow публикует сборку в ветку `gh-pages`. В Settings → Pages укажите branch **`gh-pages`** / root.

@@ -27,7 +27,7 @@ export function BattleView() {
   const [copied, setCopied] = useState(false);
 
   const onlineStatus = online.getStatus();
-  const inviteUrl = online.getInviteUrl();
+  const roomId = online.getRoomId();
   const myColor = online.getMyColor();
   const activeDeck = decks.find((d) => d.id === activeDeckId) ?? decks[0];
 
@@ -80,15 +80,25 @@ export function BattleView() {
     }
   };
 
-  const copyInvite = async () => {
-    if (!inviteUrl) return;
-    await navigator.clipboard.writeText(inviteUrl);
+  const copyCode = async () => {
+    if (!roomId) return;
+    await navigator.clipboard.writeText(roomId);
     setCopied(true);
     setTimeout(() => setCopied(false), 1600);
   };
 
-  const showBoard =
-    battleMode === 'ai' || onlineStatus === 'playing' || state.phase === 'gameOver';
+  const showLobby =
+    battleMode === 'online' &&
+    (onlineStatus === 'idle' ||
+      onlineStatus === 'error' ||
+      onlineStatus === 'disconnected' ||
+      onlineStatus === 'connecting');
+
+  const boardVisible =
+    battleMode === 'ai' ||
+    onlineStatus === 'waiting' ||
+    onlineStatus === 'playing' ||
+    (battleMode === 'online' && state.phase === 'gameOver');
 
   return (
     <section className={styles.wrap}>
@@ -119,14 +129,14 @@ export function BattleView() {
         </button>
       </div>
 
-      {battleMode === 'online' && onlineStatus !== 'playing' && (
+      {showLobby && (
         <div className={styles.lobby}>
           <label className={styles.lobbyField}>
-            Колода для матча
+            Ваша колода
             <select
               value={activeDeckId}
               onChange={(e) => setActiveDeckId(e.target.value)}
-              disabled={busy || onlineStatus === 'waiting'}
+              disabled={busy}
             >
               {decks.map((d) => (
                 <option key={d.id} value={d.id}>
@@ -136,8 +146,8 @@ export function BattleView() {
             </select>
           </label>
           <p className={styles.lobbyHint}>
-            Активная: {activeDeck?.name ?? '—'}. Соперник получит вашу расстановку при входе в
-            комнату.
+            У каждого игрока своя колода: вы берёте «{activeDeck?.name ?? '—'}», соперник — свою при
+            входе.
           </p>
           <div className={styles.lobbyActions}>
             <button type="button" className={styles.primary} onClick={createRoom} disabled={busy}>
@@ -148,30 +158,33 @@ export function BattleView() {
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value)}
                 placeholder="код комнаты"
-                disabled={busy || onlineStatus === 'waiting'}
+                disabled={busy}
               />
               <button type="button" onClick={joinRoom} disabled={busy || !joinCode.trim()}>
                 Войти
               </button>
             </div>
           </div>
-          {onlineStatus === 'waiting' && inviteUrl && (
-            <div className={styles.invite}>
-              <p>
-                Комната <strong>{online.getRoomId()}</strong> — вы белые. Отправьте ссылку:
-              </p>
-              <code className={styles.inviteUrl}>{inviteUrl}</code>
-              <button type="button" onClick={copyInvite}>
-                {copied ? 'Скопировано' : 'Копировать ссылку'}
-              </button>
-            </div>
-          )}
         </div>
       )}
 
-      {showBoard && (
+      {boardVisible && (
         <div className={styles.layout}>
-          <BoardView />
+          <div className={styles.boardCol}>
+            {onlineStatus === 'waiting' && roomId && (
+              <div className={styles.roomBanner}>
+                <div>
+                  <p className={styles.roomLabel}>Код комнаты — передайте сопернику</p>
+                  <p className={styles.roomCode}>{roomId}</p>
+                  <p className={styles.roomHint}>Вы белые. Ходы начнутся, когда соперник войдёт.</p>
+                </div>
+                <button type="button" className={styles.copyCode} onClick={copyCode}>
+                  {copied ? 'Скопировано' : 'Копировать код'}
+                </button>
+              </div>
+            )}
+            <BoardView />
+          </div>
           <aside className={styles.history} aria-label="История ходов">
             <h3 className={styles.historyTitle}>История</h3>
             {moveHistory.length === 0 ? (
@@ -201,7 +214,7 @@ export function BattleView() {
 
       <p className={styles.hint}>
         {battleMode === 'online'
-          ? 'Создайте комнату и отправьте ссылку. Соединение peer-to-peer (PeerJS), отдельный сервер не нужен.'
+          ? 'Создайте комнату (код на доске) или войдите по коду. У каждого — своя колода.'
           : 'Выберите фигуру, затем клетку. Рокировка — король на два поля к ладье.'}
       </p>
     </section>

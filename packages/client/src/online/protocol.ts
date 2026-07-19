@@ -27,11 +27,3 @@ export function randomRoomCode(): string {
   }
   return out;
 }
-
-/** Public invite URL for the current origin + Vite base. */
-export function buildInviteUrl(roomId: string): string {
-  const url = new URL(location.href);
-  url.searchParams.set('room', roomId);
-  // Keep path at app root (GitHub Pages base already in pathname)
-  return url.toString();
-}

@@ -1,5 +1,6 @@
 import {
   applyCommand,
+  classicBasePlacements,
   createDemoMatch,
   createMatchFromPlacements,
   getLegalMoves,
@@ -11,7 +12,6 @@ import {
 } from '@chessforge/engine';
 import type { GameSessionListener } from './GameSession';
 import {
-  buildInviteUrl,
   peerIdForRoom,
   randomRoomCode,
   type PeerMessage,
@@ -31,7 +31,6 @@ type PeerCtor = new (...args: any[]) => PeerInstance;
 type PeerInstance = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, cb: (...args: any[]) => void): void;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   connect(id: string, options?: { reliable?: boolean }): DataConn;
   destroy(): void;
 };
@@ -45,7 +44,6 @@ type DataConn = {
 };
 
 async function loadPeer(): Promise<PeerCtor> {
-  // Keep a real dynamic import for types/bundlers, but production inlines it.
   const mod = await import('peerjs');
   if (typeof mod.Peer === 'function') return mod.Peer as unknown as PeerCtor;
   const d = mod.default as unknown;
@@ -61,9 +59,8 @@ async function loadPeer(): Promise<PeerCtor> {
 }
 
 /**
- * P2P online session via PeerJS (works on GitHub Pages — no game server).
- * Host (white) is authoritative for match state and command validation.
- * PeerJS is lazy-loaded so the main app boots without it.
+ * P2P online session via PeerJS.
+ * Host (white) is authoritative. Each side brings its own deck placements.
  */
 export class OnlineGameSession {
   private state: MatchState = createDemoMatch();
@@ -95,12 +92,8 @@ export class OnlineGameSession {
     return this.myColor;
   }
 
-  getInviteUrl(): string | null {
-    if (!this.roomId) return null;
-    return buildInviteUrl(this.roomId);
-  }
-
   getLegalMovesFrom(from: { x: number; y: number }) {
+    if (this.status !== 'playing') return [];
     return getLegalMoves(this.state, from);
   }
 
@@ -294,6 +287,11 @@ export class OnlineGameSession {
         });
 
         this.roomId = roomId;
+        this.state = createMatchFromPlacements(
+          placements,
+          classicBasePlacements(),
+          (Date.now() >>> 0) || 1,
+        );
         this.setStatus('waiting');
         this.lastError = null;
         this.emit([]);

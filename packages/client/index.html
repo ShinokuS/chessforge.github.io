@@ -4,41 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Chessforge</title>
-    <style>
-      html,
-      body {
-        margin: 0;
-        min-height: 100%;
-        background: #1a2218;
-        color: #e8edd8;
-        font-family: system-ui, sans-serif;
-      }
-      #root {
-        padding: 1.5rem;
-      }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Source+Sans+3:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
   </head>
   <body>
-    <div id="root">Загрузка Chessforge…</div>
-    <script>
-      console.info('[chessforge] html parsed');
-      setTimeout(function () {
-        var root = document.getElementById('root');
-        var t = (root && root.textContent) || '';
-        if (/Загрузка|Монтирование|Запуск/.test(t)) {
-          console.error('[chessforge] still loading after 8s:', t);
-          root.innerHTML =
-            '<div style="max-width:36rem">' +
-            '<h1 style="font-size:1.25rem">Страница зависла на старте</h1>' +
-            '<p>Статус: ' +
-            t +
-            '</p>' +
-            '<p>F12 → Network: проверьте <code>assets/*.js</code> (должен быть 200).</p>' +
-            '<p>Попробуйте Ctrl+Shift+R или другое окно инкогнито.</p>' +
-            '</div>';
-        }
-      }, 8000);
-    </script>
+    <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

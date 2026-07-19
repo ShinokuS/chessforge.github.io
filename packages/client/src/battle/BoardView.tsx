@@ -26,6 +26,7 @@ const ABILITY_LABEL: Record<string, string> = {
 export function BoardView() {
   const state = useAppStore((s) => s.state);
   const selected = useAppStore((s) => s.selected);
+  const lastMove = useAppStore((s) => s.lastMove);
   const setSelected = useAppStore((s) => s.setSelected);
   const submitMove = useAppStore((s) => s.submitMove);
   const session = useAppStore((s) => s.session);
@@ -41,6 +42,7 @@ export function BoardView() {
 
   const onCellClick = (pos: Coord) => {
     if (state.phase !== 'play') return;
+    if (battleMode === 'online' && online.getStatus() !== 'playing') return;
     if (!myColor || state.activePlayer !== myColor) return;
 
     const move = legalMap.get(`${pos.x},${pos.y}`);
@@ -58,15 +60,25 @@ export function BoardView() {
   };
 
   const { width, height } = state.board;
+  const flip = myColor === 'black';
   const cells: ReactNode[] = [];
 
-  for (let y = height - 1; y >= 0; y--) {
-    for (let x = 0; x < width; x++) {
+  const yOrder = flip
+    ? Array.from({ length: height }, (_, i) => i)
+    : Array.from({ length: height }, (_, i) => height - 1 - i);
+  const xOrder = flip
+    ? Array.from({ length: width }, (_, i) => width - 1 - i)
+    : Array.from({ length: width }, (_, i) => i);
+
+  for (const y of yOrder) {
+    for (const x of xOrder) {
       const pos = { x, y };
       const tileId = getTileId(state.board, pos) ?? 'plain';
       const piece = state.pieces.find((p) => p.pos.x === x && p.pos.y === y);
       const isDark = (x + y) % 2 === 1;
       const isSelected = selected?.x === x && selected?.y === y;
+      const isLastFrom = lastMove?.from.x === x && lastMove?.from.y === y;
+      const isLastTo = lastMove?.to.x === x && lastMove?.to.y === y;
       const move = legalMap.get(`${x},${y}`);
       const tileDef = getTileDefinition(tileId);
       const spiked = Boolean(piece?.spikeArmed);
@@ -80,6 +92,7 @@ export function BoardView() {
         tileId === 'cave' ? styles.cave : '',
         tileId === 'lake' ? styles.lake : '',
         isSelected ? styles.selected : '',
+        isLastFrom || isLastTo ? styles.lastMove : '',
         move && !move.captures ? styles.canMove : '',
         move?.captures ? styles.canCapture : '',
         spiked ? styles.spikeDoom : '',
