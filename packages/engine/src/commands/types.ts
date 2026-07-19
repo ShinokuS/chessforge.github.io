@@ -33,6 +33,19 @@ export type GameEvent =
       from: Coord;
       to: Coord;
     }
+  | {
+      type: 'Pushed';
+      pieceId: string;
+      byPieceId: string;
+      from: Coord;
+      to: Coord;
+    }
+  | { type: 'Healed'; pieceId: string; byPieceId: string; at: Coord; hp: number }
+  | { type: 'ShieldGranted'; pieceId: string; byPieceId: string; turns: number }
+  | { type: 'TitleTransferred'; fromPieceId: string; toPieceId: string }
+  | { type: 'Designated'; pieceId: string; byPieceId: string }
+  | { type: 'Promoted'; pieceId: string; toDefId: string; at: Coord }
+  | { type: 'Reflected'; pieceId: string; byPieceId: string; damage: number }
   | { type: 'Teleported'; pieceId: string; from: Coord; to: Coord; tileId: string }
   | { type: 'TileTriggered'; tileId: string; pieceId: string; at: Coord; note: string }
   | { type: 'PieceDestroyed'; pieceId: string; at: Coord; reason?: string }

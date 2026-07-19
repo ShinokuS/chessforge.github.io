@@ -107,6 +107,8 @@ type AppStore = {
   events: GameEvent[];
   moveHistory: MoveHistoryEntry[];
   lastMove: LastMoveHighlight | null;
+  /** Piece defIds captured by each side (Lichess-style material). */
+  captures: { white: string[]; black: string[] };
   clocks: MatchClocks;
   endBanner: EndBanner | null;
   analysis: GameAnalysis;
@@ -159,14 +161,26 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ state, events, lastError });
       return;
     }
-    const { moveHistory, clocks } = get();
+    const { moveHistory, clocks, captures } = get();
     const realPlyCount = moveHistory.filter(isPlyEntry).length;
     const appended = formatEventsToHistory(events, state, realPlyCount + 1);
     const move = lastMoveFromEvents(events);
 
     let nextClocks = clocks;
     let endBanner = get().endBanner;
+    const beforeState = get().state;
+    const nextCaptures = {
+      white: [...captures.white],
+      black: [...captures.black],
+    };
     for (const e of events) {
+      if (e.type === 'Captured') {
+        const victim = beforeState.pieces.find((p) => p.id === e.pieceId);
+        if (victim) {
+          const capturer = victim.owner === 'white' ? 'black' : 'white';
+          nextCaptures[capturer].push(e.defId);
+        }
+      }
       if (e.type === 'TurnEnded') {
         nextClocks = switchClock(nextClocks, e.next);
       }
@@ -180,7 +194,6 @@ export const useAppStore = create<AppStore>((set, get) => {
         if (existing?.kind === 'resign' || existing?.kind === 'timeout') {
           endBanner = existing;
         } else if (events.length === 1) {
-          // Lone GameOver = resign (or peer resign); combat ends with more events.
           endBanner = {
             kind: 'resign',
             winner: e.winner,
@@ -198,6 +211,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       lastError,
       clocks: nextClocks,
       endBanner,
+      captures: nextCaptures,
       moveHistory: appended.length ? [...moveHistory, ...appended] : moveHistory,
       ...(move ? { lastMove: move } : {}),
     });
@@ -235,6 +249,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           selected: null,
           moveHistory: [],
           lastMove: null,
+          captures: { white: [], black: [] },
           lastError: null,
           endBanner: null,
           analysis: idleAnalysis(),
@@ -249,6 +264,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         selected: null,
         moveHistory: [],
         lastMove: null,
+        captures: { white: [], black: [] },
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),
@@ -262,6 +278,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     events: [],
     moveHistory: [],
     lastMove: null,
+    captures: { white: [], black: [] },
     clocks: freshClocks(null),
     endBanner: null,
     analysis: idleAnalysis(),
@@ -437,14 +454,17 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (!piece || !canControl(piece.owner)) return;
 
       const active = battleMode === 'online' ? o : s;
-      const legal = active.getLegalMovesFrom(selected).find(
-        (m) => m.to.x === to.x && m.to.y === to.y,
-      );
+      const moves = active
+        .getLegalMovesFrom(selected)
+        .filter((m) => m.to.x === to.x && m.to.y === to.y);
+      const legal =
+        moves.find((m) => Boolean(m.abilityId) || Boolean(m.push)) ?? moves[0];
+      if (!legal) return;
       active.submitCommand({
         type: 'move',
         from: selected,
         to,
-        ...(legal?.abilityId !== undefined ? { abilityId: legal.abilityId } : {}),
+        ...(legal.abilityId !== undefined ? { abilityId: legal.abilityId } : {}),
       });
       set({ selected: null });
     },
@@ -463,6 +483,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         selected: null,
         moveHistory: [],
         lastMove: null,
+        captures: { white: [], black: [] },
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),
@@ -480,6 +501,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           selected: null,
           moveHistory: [],
           lastMove: null,
+          captures: { white: [], black: [] },
           lastError: null,
           endBanner: null,
           analysis: idleAnalysis(),
@@ -493,6 +515,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         selected: null,
         moveHistory: [],
         lastMove: null,
+        captures: { white: [], black: [] },
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),

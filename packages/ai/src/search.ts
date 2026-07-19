@@ -2,6 +2,7 @@ import {
   applyCommand,
   getLegalMoves,
   getPieceDefinition,
+  isRoyalPiece,
   type GameCommand,
   type LegalMove,
   type MatchState,
@@ -117,8 +118,8 @@ function scoreMove(
     const attacker = state.pieces.find((p) => p.pos.x === m.from.x && p.pos.y === m.from.y);
     const atk = attacker ? pieceTacticalValue(attacker.defId) : 100;
     // MVV-LVA — king takes are absolute priority (game over).
-    const isKingCap =
-      target && getPieceDefinition(target.defId).baseRole === 'king';
+    // MVV-LVA — royal takes are absolute priority (game over).
+    const isKingCap = Boolean(target && isRoyalPiece(target));
     s += isKingCap ? 5_000_000 : 10_000 + victim * 16 - Math.floor(atk / 8);
     if (target && attacker && getPieceDefinition(attacker.defId).freezeInsteadOfCapture) {
       s += 800; // prefer freeze tempos
@@ -190,21 +191,32 @@ function quiesce(state: MatchState, alpha: number, beta: number, ctx: SearchCont
 
   const inCheck = isKingEnPrise(state, state.activePlayer);
 
-  // When the king can be taken, stand-pat is meaningless — search ALL evasions
-  // (quiet king flights / interpositions), not just captures.
+  // When the king can be taken, stand-pat is meaningless — only try moves that
+  // resolve the threat (otherwise the opponent takes the king in the next ply).
   if (inCheck) {
     const evasions = orderMoves(state, getLegalMoves(state), ctx, ply, null);
     if (evasions.length === 0) return evalStm(state, ply);
     let best = -INF;
+    let any = false;
     for (const m of evasions) {
       if (shouldStop(ctx)) break;
       const result = applyCommand(state, moveToCommand(m));
       if (!result.ok) continue;
+      // Skip moves that leave our king capturable — opponent would take it.
+      if (
+        result.state.phase === 'play' &&
+        isKingEnPrise(result.state, state.activePlayer)
+      ) {
+        continue;
+      }
+      any = true;
       const score = -quiesce(result.state, -beta, -alpha, ctx, ply + 1);
       if (score > best) best = score;
       if (score >= beta) return score;
       if (score > alpha) alpha = score;
     }
+    // No safe move: king falls next — treat as lost.
+    if (!any) return -1_000_000 + ply;
     return best === -INF ? evalStm(state, ply) : best;
   }
 

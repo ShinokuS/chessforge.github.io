@@ -81,7 +81,15 @@ export function formatMoveCommand(state: MatchState, cmd: GameCommand): string {
           ? ' (прыжок)'
           : cmd.abilityId === 'allySwap'
             ? ' (обмен)'
-            : '';
+            : cmd.abilityId === 'blessHeal'
+              ? ' (лечение)'
+              : cmd.abilityId === 'abdicate'
+                ? ' (титул)'
+                : cmd.abilityId === 'grantShield'
+                  ? ' (щит)'
+                  : cmd.abilityId === 'designatePromote'
+                    ? ' (назначение)'
+                    : '';
   return `${name} ${sq(cmd.from.x, cmd.from.y)}→${sq(cmd.to.x, cmd.to.y)}${ability}`;
 }
 

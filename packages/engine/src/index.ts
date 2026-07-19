@@ -56,7 +56,7 @@ export {
 } from './defs/catalog.js';
 export { ROLE_LABELS } from './defs/pieces/basic.js';
 
-export { applyCommand } from './commands/apply.js';
+export { applyCommand, isRoyalPiece } from './commands/apply.js';
 export type {
   GameCommand,
   GameEvent,

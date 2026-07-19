@@ -340,6 +340,25 @@
   font-size: 0.78rem;
 }
 
+.captures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.12rem;
+  padding: 0 0.15rem;
+  min-height: 0.25rem;
+}
+
+.captureIcon {
+  display: inline-flex;
+  width: 1.15rem;
+  height: 1.15rem;
+  opacity: 0.9;
+}
+
+.captureIcon svg {
+  display: block;
+}
+
 .history {
   flex: 1 1 0;
   min-height: 0;

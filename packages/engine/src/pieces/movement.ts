@@ -18,6 +18,8 @@ export type LegalMove = {
   targetPieceId?: string;
   abilityId?: AbilityId;
   castle?: 'kingside' | 'queenside';
+  /** Ram push: target is shoved to `to`, mover stays. */
+  push?: boolean;
 };
 
 const KING_OFFSETS: Coord[] = [
@@ -79,6 +81,10 @@ function pathClear(state: MatchState, from: Coord, to: Coord): boolean {
 
 function isKingRole(defId: string): boolean {
   return getPieceDefinition(defId).baseRole === 'king';
+}
+
+function isRoyalPiece(p: PieceInstance): boolean {
+  return Boolean(p.isRoyal);
 }
 
 function resolveSlideRange(
@@ -331,12 +337,41 @@ function addFreezeTargets(state: MatchState, piece: PieceInstance, out: LegalMov
   }
 }
 
+function addRamPush(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+  const def = getPieceDefinition(piece.defId);
+  if (!def.pushForward) return;
+  const fwd = facingSign(piece.owner);
+  const ahead = { x: piece.pos.x, y: piece.pos.y + fwd };
+  if (!inBounds(ahead, state.board.width, state.board.height)) return;
+  const victim = pieceAt(state, ahead);
+  if (!victim) return;
+  if ((victim.shieldTurns ?? 0) > 0) return;
+  const dest = { x: ahead.x, y: ahead.y + fwd };
+  if (!inBounds(dest, state.board.width, state.board.height)) return;
+  if (!isPassable(state.board, dest)) return;
+  if (pieceAt(state, dest)) return;
+  out.push({
+    from: { ...piece.pos },
+    to: { ...dest },
+    captures: false,
+    targetPieceId: victim.id,
+    push: true,
+  });
+}
+
+function abilityReady(piece: PieceInstance, abilityId: AbilityId, cooldownTurns?: number): boolean {
+  if (cooldownTurns !== undefined) {
+    return (piece.abilityCooldowns?.[abilityId] ?? 0) <= 0;
+  }
+  return !piece.abilitiesUsed[abilityId];
+}
+
 function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.abilities) return;
 
   for (const ability of def.abilities) {
-    if (piece.abilitiesUsed[ability.id]) continue;
+    if (!abilityReady(piece, ability.id, ability.cooldownTurns)) continue;
 
     if (ability.id === 'retreat') {
       const backDir = { x: 0, y: -facingSign(piece.owner) };
@@ -351,12 +386,10 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
     }
 
     if (ability.id === 'royalWarp') {
-      const king = state.pieces.find(
-        (p) => p.owner === piece.owner && isKingRole(p.defId),
-      );
-      if (!king) continue;
+      const royal = state.pieces.find((p) => p.owner === piece.owner && isRoyalPiece(p));
+      if (!royal) continue;
       for (const off of KING_OFFSETS) {
-        const to = { x: king.pos.x + off.x, y: king.pos.y + off.y };
+        const to = { x: royal.pos.x + off.x, y: royal.pos.y + off.y };
         if (!inBounds(to, state.board.width, state.board.height)) continue;
         if (!isPassable(state.board, to)) continue;
         if (pieceAt(state, to)) continue;
@@ -416,6 +449,64 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
         }
       }
     }
+
+    if (ability.id === 'blessHeal') {
+      for (const ally of state.pieces) {
+        if (ally.owner !== piece.owner || ally.id === piece.id) continue;
+        if (chebyshev(piece.pos, ally.pos) > 3) continue;
+        const maxHp = getPieceDefinition(ally.defId).maxHp;
+        if (ally.hp >= maxHp) continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...ally.pos },
+          captures: false,
+          targetPieceId: ally.id,
+          abilityId: 'blessHeal',
+        });
+      }
+    }
+
+    if (ability.id === 'abdicate') {
+      for (const ally of state.pieces) {
+        if (ally.owner !== piece.owner || ally.id === piece.id) continue;
+        if (getPieceDefinition(ally.defId).baseRole !== 'queen') continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...ally.pos },
+          captures: false,
+          targetPieceId: ally.id,
+          abilityId: 'abdicate',
+        });
+      }
+    }
+
+    if (ability.id === 'grantShield') {
+      for (const ally of state.pieces) {
+        if (ally.owner !== piece.owner || ally.id === piece.id) continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...ally.pos },
+          captures: false,
+          targetPieceId: ally.id,
+          abilityId: 'grantShield',
+        });
+      }
+    }
+
+    if (ability.id === 'designatePromote') {
+      for (const ally of state.pieces) {
+        if (ally.owner !== piece.owner) continue;
+        if (getPieceDefinition(ally.defId).baseRole !== 'pawn') continue;
+        if (ally.promotesToBaseQueen) continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...ally.pos },
+          captures: false,
+          targetPieceId: ally.id,
+          abilityId: 'designatePromote',
+        });
+      }
+    }
   }
 }
 
@@ -423,7 +514,7 @@ function dedupeMoves(moves: LegalMove[]): LegalMove[] {
   const seen = new Set<string>();
   const out: LegalMove[] = [];
   for (const m of moves) {
-    const key = `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.captures}:${m.abilityId ?? ''}:${m.castle ?? ''}`;
+    const key = `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.captures}:${m.abilityId ?? ''}:${m.castle ?? ''}:${m.push ? 1 : 0}:${m.targetPieceId ?? ''}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(m);
@@ -470,6 +561,7 @@ export function getLegalMovesForPiece(
   }
 
   addAbilityMoves(state, piece, moves);
+  addRamPush(state, piece, moves);
   addCaveMoves(state, piece, moves);
   addCastlingMoves(state, piece, moves);
 

@@ -441,8 +441,8 @@ describe('cryomancer freeze', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.pieces.find((p) => p.id === 'cq')?.pos).toEqual({ x: 0, y: 0 });
-    expect(result.state.pieces.find((p) => p.id === 'bp')?.frozenTurns).toBe(1);
-    expect(result.state.pieces.find((p) => p.id === 'cq')?.freezeCooldown).toBe(3);
+    expect(result.state.pieces.find((p) => p.id === 'bp')?.frozenTurns).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'cq')?.freezeCooldown).toBe(4);
     expect(result.events.some((e) => e.type === 'Frozen')).toBe(true);
 
     // Black king step
@@ -602,6 +602,212 @@ describe('new tiles', () => {
     if (!result.ok) return;
     expect(result.state.pieces.find((p) => p.id === 'r1')?.hp).toBe(2);
     expect(result.state.board.tiles[2]![0]).toBe('plain');
+  });
+});
+
+describe('new piece mods', () => {
+  it('ram pushes a piece one square further', () => {
+    const state = blankMatch([
+      createPieceInstance('ram', 'white', { x: 3, y: 1 }, 'ram'),
+      createPieceInstance('pawn', 'black', { x: 3, y: 2 }, 'bp'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const push = getLegalMoves(state, { x: 3, y: 1 }).find((m) => m.push);
+    expect(push?.to).toEqual({ x: 3, y: 3 });
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 1 },
+      to: { x: 3, y: 3 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'ram')?.pos).toEqual({ x: 3, y: 1 });
+    expect(result.state.pieces.find((p) => p.id === 'bp')?.pos).toEqual({ x: 3, y: 3 });
+  });
+
+  it('bristling reflects damage once and can kill the attacker', () => {
+    const state = blankMatch([
+      createPieceInstance('rook', 'white', { x: 0, y: 0 }, 'rw'),
+      createPieceInstance('bristling', 'black', { x: 0, y: 4 }, 'bp'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    // Black end-turn fluff: white to move already
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 4 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'bp')).toBeUndefined();
+    expect(result.state.pieces.find((p) => p.id === 'rw')).toBeUndefined();
+    expect(result.events.some((e) => e.type === 'Reflected')).toBe(true);
+  });
+
+  it('hierophant heals an ally and goes on cooldown', () => {
+    const state = blankMatch([
+      createPieceInstance('hierophant', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('ironclad', 'white', { x: 4, y: 1 }, 'iw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    state.pieces.find((p) => p.id === 'iw')!.hp = 1;
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 4, y: 0 },
+      to: { x: 4, y: 1 },
+      abilityId: 'blessHeal',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'iw')?.hp).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'kw')?.abilityCooldowns.blessHeal).toBe(4);
+  });
+
+  it('dynast transfers royal title so only the queen matters for mate', () => {
+    const state = blankMatch([
+      createPieceInstance('dynast', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('queen', 'white', { x: 3, y: 3 }, 'qw'),
+      createPieceInstance('rook', 'black', { x: 4, y: 4 }, 'rb'),
+      createPieceInstance('rook', 'black', { x: 3, y: 7 }, 'rb2'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const abdicate = applyCommand(state, {
+      type: 'move',
+      from: { x: 4, y: 0 },
+      to: { x: 3, y: 3 },
+      abilityId: 'abdicate',
+    });
+    expect(abdicate.ok).toBe(true);
+    if (!abdicate.ok) return;
+    expect(abdicate.state.pieces.find((p) => p.id === 'kw')?.isRoyal).toBe(false);
+    expect(abdicate.state.pieces.find((p) => p.id === 'qw')?.isRoyal).toBe(true);
+
+    const takeKing = applyCommand(abdicate.state, {
+      type: 'move',
+      from: { x: 4, y: 4 },
+      to: { x: 4, y: 0 },
+    });
+    expect(takeKing.ok).toBe(true);
+    if (!takeKing.ok) return;
+    expect(takeKing.state.phase).toBe('play');
+    expect(takeKing.state.pieces.find((p) => p.id === 'kw')).toBeUndefined();
+
+    const whiteQuiet = applyCommand(takeKing.state, {
+      type: 'move',
+      from: { x: 3, y: 3 },
+      to: { x: 3, y: 4 },
+    });
+    expect(whiteQuiet.ok).toBe(true);
+    if (!whiteQuiet.ok) return;
+
+    const mate = applyCommand(whiteQuiet.state, {
+      type: 'move',
+      from: { x: 3, y: 7 },
+      to: { x: 3, y: 4 },
+    });
+    expect(mate.ok).toBe(true);
+    if (!mate.ok) return;
+    expect(mate.state.phase).toBe('gameOver');
+    expect(mate.state.winner).toBe('black');
+  });
+
+  it('courser can leap two forward', () => {
+    const state = blankMatch([
+      createPieceInstance('courser', 'white', { x: 1, y: 0 }, 'nw'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    expect(
+      getLegalMoves(state, { x: 1, y: 0 }).some((m) => m.to.x === 1 && m.to.y === 2),
+    ).toBe(true);
+  });
+
+  it('aegis grants shield with cooldown', () => {
+    const state = blankMatch([
+      createPieceInstance('aegis', 'white', { x: 0, y: 0 }, 'rw'),
+      createPieceInstance('pawn', 'white', { x: 1, y: 1 }, 'pw'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 1, y: 1 },
+      abilityId: 'grantShield',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'pw')?.shieldTurns).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'rw')?.abilityCooldowns.grantShield).toBe(4);
+  });
+
+  it('patron designates a pawn that promotes on last rank', () => {
+    const state = blankMatch([
+      createPieceInstance('patron', 'white', { x: 3, y: 0 }, 'qw'),
+      createPieceInstance('pawn', 'white', { x: 0, y: 6 }, 'pw'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const des = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 0 },
+      to: { x: 0, y: 6 },
+      abilityId: 'designatePromote',
+    });
+    expect(des.ok).toBe(true);
+    if (!des.ok) return;
+    expect(des.state.pieces.find((p) => p.id === 'pw')?.promotesToBaseQueen).toBe(true);
+    expect(des.state.activePlayer).toBe('black');
+
+    const blackMove = applyCommand(des.state, {
+      type: 'move',
+      from: { x: 4, y: 7 },
+      to: { x: 5, y: 7 },
+    });
+    expect(blackMove.ok).toBe(true);
+    if (!blackMove.ok) return;
+    const advance = applyCommand(blackMove.state, {
+      type: 'move',
+      from: { x: 0, y: 6 },
+      to: { x: 0, y: 7 },
+    });
+    expect(advance.ok).toBe(true);
+    if (!advance.ok) return;
+    const promoted = advance.state.pieces.find((p) => p.id === 'pw');
+    expect(promoted?.defId).toBe('queen');
+    expect(promoted?.promotesToBaseQueen).toBe(false);
+  });
+
+  it('cryomancer freezes for 2 turns with 4-turn cooldown', () => {
+    const state = blankMatch([
+      createPieceInstance('cryomancer', 'white', { x: 3, y: 3 }, 'cw'),
+      createPieceInstance('rook', 'black', { x: 3, y: 5 }, 'rb'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 3 },
+      to: { x: 3, y: 5 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'rb')?.frozenTurns).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'cw')?.freezeCooldown).toBe(4);
+  });
+
+  it('bastion moves like a king and has 4 hp', () => {
+    const state = blankMatch([
+      createPieceInstance('bastion', 'white', { x: 2, y: 2 }, 'bw'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    expect(state.pieces.find((p) => p.id === 'bw')?.hp).toBe(4);
+    const moves = getLegalMoves(state, { x: 2, y: 2 });
+    expect(moves.some((m) => m.to.x === 3 && m.to.y === 3)).toBe(true);
+    expect(moves.some((m) => m.to.x === 5 && m.to.y === 5)).toBe(false);
   });
 });
 

@@ -13,6 +13,7 @@ import {
   type TimePresetId,
 } from './settings';
 import { useAppStore } from '../app/store';
+import { PieceIcon } from './PieceIcon';
 
 const JUDGMENT_CLASS: Record<MoveJudgment, string> = {
   best: styles.jBest ?? '',
@@ -28,6 +29,7 @@ export function BattleView() {
   const lastError = useAppStore((s) => s.lastError);
   const moveHistory = useAppStore((s) => s.moveHistory);
   const clocks = useAppStore((s) => s.clocks);
+  const captures = useAppStore((s) => s.captures);
   const endBanner = useAppStore((s) => s.endBanner);
   const restart = useAppStore((s) => s.restart);
   const resign = useAppStore((s) => s.resign);
@@ -484,6 +486,15 @@ export function BattleView() {
                   {topSide === 'white' ? 'белые' : 'чёрные'}
                 </span>
               </div>
+              {captures[topSide].length > 0 && (
+                <div className={styles.captures} aria-label="Съеденные фигуры">
+                  {captures[topSide].map((defId, i) => (
+                    <span key={`${defId}-${i}`} className={styles.captureIcon}>
+                      <PieceIcon defId={defId} owner={bottomSide} />
+                    </span>
+                  ))}
+                </div>
+              )}
 
               <div className={styles.history} aria-label="История ходов">
                 <div className={styles.historyHead}>
@@ -659,6 +670,15 @@ export function BattleView() {
                   {bottomSide === 'white' ? 'белые' : 'чёрные'}
                 </span>
               </div>
+              {captures[bottomSide].length > 0 && (
+                <div className={styles.captures} aria-label="Съеденные фигуры">
+                  {captures[bottomSide].map((defId, i) => (
+                    <span key={`${defId}-${i}`} className={styles.captureIcon}>
+                      <PieceIcon defId={defId} owner={topSide} />
+                    </span>
+                  ))}
+                </div>
+              )}
 
               {showClocks ? (
                 <div

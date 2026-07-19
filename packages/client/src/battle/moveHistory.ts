@@ -127,7 +127,15 @@ export function formatEventsToHistory(
               ? ' (прыжок)'
               : e.abilityId === 'allySwap'
                 ? ' (обмен)'
-                : '';
+                : e.abilityId === 'blessHeal'
+                  ? ' (лечение)'
+                  : e.abilityId === 'abdicate'
+                    ? ' (титул)'
+                    : e.abilityId === 'grantShield'
+                      ? ' (щит)'
+                      : e.abilityId === 'designatePromote'
+                        ? ' (назначение)'
+                        : '';
       const name = pieceName(stateAfter, e.pieceId);
       let captureNote = '';
       if (pendingCapture) {
@@ -144,6 +152,41 @@ export function formatEventsToHistory(
       pushMove(
         ownerOf(stateAfter, e.pieceId, ply),
         `${name} обмен с ${other} ${sq(e.from)}⇄${sq(e.to)}`,
+      );
+    } else if (e.type === 'Pushed') {
+      pushMove(
+        ownerOf(stateAfter, e.byPieceId, ply),
+        `Таран: ${pieceName(stateAfter, e.pieceId)} ${sq(e.from)}→${sq(e.to)}`,
+      );
+    } else if (e.type === 'Healed') {
+      pushMove(
+        ownerOf(stateAfter, e.byPieceId, ply),
+        `Лечение ${pieceName(stateAfter, e.pieceId)} (${e.hp} HP)`,
+      );
+    } else if (e.type === 'ShieldGranted') {
+      pushMove(
+        ownerOf(stateAfter, e.byPieceId, ply),
+        `Щит → ${pieceName(stateAfter, e.pieceId)}`,
+      );
+    } else if (e.type === 'TitleTransferred') {
+      pushMove(
+        ownerOf(stateAfter, e.fromPieceId, ply),
+        `Титул → ${pieceName(stateAfter, e.toPieceId)}`,
+      );
+    } else if (e.type === 'Designated') {
+      pushMove(
+        ownerOf(stateAfter, e.byPieceId, ply),
+        `Назначение ${pieceName(stateAfter, e.pieceId)}`,
+      );
+    } else if (e.type === 'Promoted') {
+      pushSystem(
+        ownerOf(stateAfter, e.pieceId, ply),
+        `Превращение в ферзя на ${sq(e.at)}`,
+      );
+    } else if (e.type === 'Reflected') {
+      pushSystem(
+        ply % 2 === 1 ? 'white' : 'black',
+        `Отражение урона (${e.damage})`,
       );
     } else if (e.type === 'Castled') {
       const side = e.side === 'kingside' ? '0-0' : '0-0-0';

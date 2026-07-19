@@ -3,7 +3,15 @@ import type { Coord, PlayerId } from '../board/types.js';
 export type TileId = string;
 export type PieceDefId = string;
 export type PieceRole = 'king' | 'queen' | 'rook' | 'bishop' | 'knight' | 'pawn';
-export type AbilityId = 'retreat' | 'royalWarp' | 'allyLeap' | 'allySwap';
+export type AbilityId =
+  | 'retreat'
+  | 'royalWarp'
+  | 'allyLeap'
+  | 'allySwap'
+  | 'blessHeal'
+  | 'abdicate'
+  | 'grantShield'
+  | 'designatePromote';
 
 export type TileDefinition = {
   id: TileId;
@@ -73,13 +81,19 @@ export type PieceDefinition = {
   cannotCapture?: boolean;
   /**
    * Capture-like moves freeze the target instead of dealing damage.
-   * Attacker stays put; target skips its next turn; freezeCooldown applies.
+   * Attacker stays put; target skips turns; freezeCooldown applies.
    */
   freezeInsteadOfCapture?: boolean;
   /** Chebyshev radius for freeze targets (default 3). */
   freezeRange?: number;
   /** Own turns the piece cannot freeze after using freeze. */
   freezeCooldownTurns?: number;
+  /** How many own turns the target stays frozen (default 1). */
+  freezeDurationTurns?: number;
+  /** Pawn: may push the piece directly ahead 1 square further (if free). */
+  pushForward?: boolean;
+  /** Once per match: when damaged, deal the same damage back to the attacker. */
+  reflectDamageOnce?: boolean;
   /** If true, piece never generates legal moves (even from buffs / castling). */
   immobile?: boolean;
   /**
@@ -93,6 +107,11 @@ export type PieceDefinition = {
   abilities?: ReadonlyArray<{
     id: AbilityId;
     description: string;
+    /**
+     * If set, ability is reusable after this many owner end-turns.
+     * If omitted, ability is once per match (`abilitiesUsed`).
+     */
+    cooldownTurns?: number;
   }>;
   maxHp: number;
   attack: number;
@@ -105,8 +124,10 @@ export type PieceInstance = {
   pos: Coord;
   hp: number;
   hasMoved: boolean;
-  /** Ability id → already consumed this match. */
+  /** Ability id → already consumed this match (once-per-match abilities). */
   abilitiesUsed: Partial<Record<AbilityId, boolean>>;
+  /** Remaining owner-turns before a cooldown ability is available again. */
+  abilityCooldowns: Partial<Record<AbilityId, number>>;
   /** Warning: standing on spikes. */
   spikeArmed: boolean;
   /**
@@ -120,8 +141,17 @@ export type PieceInstance = {
   freezeCooldown: number;
   /** Push pending from wind: fires after the opponent's turn. */
   windPending: boolean;
-  /** Remaining owner-turn ticks of forest damage immunity. */
+  /** Remaining owner-turn ticks of forest / ability damage immunity. */
   shieldTurns: number;
+  /**
+   * Royal piece: capturing it wins the match.
+   * Normally true for kings; abdicate can transfer it to a queen.
+   */
+  isRoyal: boolean;
+  /** Still has one damage-reflect charge (from reflectDamageOnce defs). */
+  reflectAvailable: boolean;
+  /** Designated by patron queen: promotes to base queen on last rank. */
+  promotesToBaseQueen: boolean;
 };
 
 export type MatchPhase = 'play' | 'gameOver';

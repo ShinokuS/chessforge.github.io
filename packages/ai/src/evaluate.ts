@@ -3,6 +3,7 @@ import {
   getLegalMoves,
   getPieceDefinition,
   getTileDef,
+  isRoyalPiece,
   type MatchState,
   type PieceInstance,
   type PlayerId,
@@ -18,7 +19,7 @@ function opposite(p: PlayerId): PlayerId {
 }
 
 function isKing(piece: PieceInstance): boolean {
-  return getPieceDefinition(piece.defId).baseRole === 'king';
+  return isRoyalPiece(piece);
 }
 
 function pieceMaterial(piece: PieceInstance): number {

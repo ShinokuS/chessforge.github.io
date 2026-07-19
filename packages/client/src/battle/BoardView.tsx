@@ -22,9 +22,13 @@ const TILE_MARK: Record<string, string> = {
 
 const ABILITY_LABEL: Record<string, string> = {
   retreat: 'Отступление',
-  royalWarp: 'Телепорт к королю',
+  royalWarp: 'Телепорт к носителю титула',
   allyLeap: 'Прыжок через союзника',
   allySwap: 'Обмен с союзником',
+  blessHeal: 'Благословение (+1 HP)',
+  abdicate: 'Передача титула',
+  grantShield: 'Эгида (щит)',
+  designatePromote: 'Назначение пешки',
 };
 
 export function BoardView() {
@@ -212,15 +216,49 @@ export function BoardView() {
                 <p className={styles.hp}>
                   HP: {hoverPiece.hp}/{hoverDef.maxHp}
                   {hoverDef.maxHp > 1 ? ' (нужно несколько ударов)' : ''}
+                  {hoverPiece.isRoyal ? ' · титул короля' : ''}
+                  {hoverPiece.promotesToBaseQueen ? ' · назначена на ферзя' : ''}
+                  {hoverDef.reflectDamageOnce
+                    ? hoverPiece.reflectAvailable
+                      ? ' · отражение готово'
+                      : ' · отражение потрачено'
+                    : ''}
                 </p>
                 {hoverDef.abilities?.map((ab) => {
+                  const cd = hoverPiece.abilityCooldowns?.[ab.id] ?? 0;
                   const used = Boolean(hoverPiece.abilitiesUsed[ab.id]);
+                  const status =
+                    cd > 0
+                      ? `перезарядка ${cd}`
+                      : used
+                        ? 'потрачена'
+                        : 'доступна';
                   return (
-                    <p key={ab.id} className={used ? styles.abilityUsed : styles.abilityReady}>
-                      {ABILITY_LABEL[ab.id] ?? ab.id}: {used ? 'потрачена' : 'доступна'}
+                    <p
+                      key={ab.id}
+                      className={used || cd > 0 ? styles.abilityUsed : styles.abilityReady}
+                    >
+                      {ABILITY_LABEL[ab.id] ?? ab.id}: {status}
                     </p>
                   );
                 })}
+                {hoverDef.pushForward && (
+                  <p className={styles.abilityReady}>Таран: толчок вперёд доступен</p>
+                )}
+                {hoverDef.freezeInsteadOfCapture && (
+                  <p
+                    className={
+                      (hoverPiece.freezeCooldown ?? 0) > 0
+                        ? styles.abilityUsed
+                        : styles.abilityReady
+                    }
+                  >
+                    Заморозка:{' '}
+                    {(hoverPiece.freezeCooldown ?? 0) > 0
+                      ? `перезарядка ${hoverPiece.freezeCooldown}`
+                      : 'готова'}
+                  </p>
+                )}
               </div>
             )}
           </>

@@ -339,7 +339,7 @@ export const regentDef: PieceDefinition = {
 
 /**
  * Не ест фигуры: заморозка врага в квадрате радиусом 3 (чебышёв).
- * После заморозки — 3 хода перезарядки.
+ * Заморозка на 2 хода; после — 4 хода перезарядки.
  */
 export const cryomancerDef: PieceDefinition = {
   id: 'cryomancer',
@@ -347,14 +347,15 @@ export const cryomancerDef: PieceDefinition = {
   baseRole: 'queen',
   isBase: false,
   description:
-    'Модификация ферзя: ходит по лучам как ферзь, но не бьёт и не ест. Вместо этого может заморозить врага в любой клетке квадрата радиусом 3 вокруг себя (сама остаётся на месте). Замороженная фигура пропускает 1 ход (голубая подсветка). После заморозки — перезарядка 3 своих хода.',
+    'Модификация ферзя: ходит по лучам как ферзь, но не бьёт и не ест. Вместо этого может заморозить врага в квадрате радиусом 3 (сама остаётся на месте). Заморозка на 2 хода цели. После — перезарядка 4 своих хода.',
   cost: 5,
   rarity: 'rare',
   maxHp: 1,
   attack: 0,
   freezeInsteadOfCapture: true,
   freezeRange: 3,
-  freezeCooldownTurns: 3,
+  freezeDurationTurns: 2,
+  freezeCooldownTurns: 4,
   movement: [{ kind: 'slide', directions: ALL_DIRS, maxRange: 8 }],
 };
 
@@ -404,24 +405,207 @@ export const anchorDef: PieceDefinition = {
   movement: [],
 };
 
+/** Толкает фигуру прямо перед собой на клетку дальше. */
+export const ramDef: PieceDefinition = {
+  id: 'ram',
+  name: 'Таран',
+  baseRole: 'pawn',
+  isBase: false,
+  description:
+    'Модификация пешки: ходит как обычная пешка. Вместо хода может толкнуть фигуру прямо перед собой на одну клетку дальше, если та свободна и проходима. Сам остаётся на месте.',
+  cost: 1,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  pushForward: true,
+  splitCapture: true,
+  captureOffsets: [
+    { x: -1, y: 1 },
+    { x: 1, y: 1 },
+  ],
+  movement: [
+    { kind: 'leap', offsets: [{ x: 0, y: 1 }] },
+    {
+      kind: 'conditional',
+      when: 'neverMoved',
+      patterns: [{ kind: 'leap', offsets: [{ x: 0, y: 2 }] }],
+    },
+  ],
+};
+
+/** Один раз за матч отражает полученный урон в атакующего. */
+export const bristlingDef: PieceDefinition = {
+  id: 'bristling',
+  name: 'Шип',
+  baseRole: 'pawn',
+  isBase: false,
+  description:
+    'Модификация пешки: классическое движение. Один раз за партию при получении урона автоматически наносит такой же урон атакующей фигуре.',
+  cost: 2,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  reflectDamageOnce: true,
+  splitCapture: true,
+  captureOffsets: [
+    { x: -1, y: 1 },
+    { x: 1, y: 1 },
+  ],
+  movement: [
+    { kind: 'leap', offsets: [{ x: 0, y: 1 }] },
+    {
+      kind: 'conditional',
+      when: 'neverMoved',
+      patterns: [{ kind: 'leap', offsets: [{ x: 0, y: 2 }] }],
+    },
+  ],
+};
+
+/** Конь + прыжок на 2 клетки прямо вперёд. */
+export const courserDef: PieceDefinition = {
+  id: 'courser',
+  name: 'Скакун',
+  baseRole: 'knight',
+  isBase: false,
+  description:
+    'Модификация коня: обычные прыжки коня, плюс может ходить и бить на 2 клетки прямо вперёд.',
+  cost: 3,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [
+    { kind: 'leap', offsets: KNIGHT_OFFSETS },
+    { kind: 'leap', offsets: [{ x: 0, y: 2 }] },
+  ],
+};
+
+/** Ходит как король, 4 HP. */
+export const bastionDef: PieceDefinition = {
+  id: 'bastion',
+  name: 'Бастион',
+  baseRole: 'bishop',
+  isBase: false,
+  description:
+    'Модификация слона: ходит и бьёт на 1 клетку в любом направлении (как король). Имеет 4 HP.',
+  cost: 3,
+  rarity: 'uncommon',
+  maxHp: 4,
+  attack: 1,
+  movement: [{ kind: 'leap', offsets: ALL_DIRS }],
+};
+
+/** Щит союзнику на 2 хода, КД 4. */
+export const aegisDef: PieceDefinition = {
+  id: 'aegis',
+  name: 'Эгида',
+  baseRole: 'rook',
+  isBase: false,
+  description:
+    'Модификация ладьи: обычные ходы. Может дать любой союзной фигуре неуязвимость на 2 хода (вместо хода). Перезарядка 4 хода.',
+  cost: 4,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'slide', directions: ORTHO, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'grantShield',
+      description: 'Неуязвимость союзнику на 2 хода. Перезарядка 4.',
+      cooldownTurns: 4,
+    },
+  ],
+};
+
+/** Назначить пешку на превращение в ферзя. */
+export const patronDef: PieceDefinition = {
+  id: 'patron',
+  name: 'Покровительница',
+  baseRole: 'queen',
+  isBase: false,
+  description:
+    'Модификация ферзя: обычные ходы. Один раз за партию может назначить союзную пешку: если она дойдёт до последней горизонтали, превратится в базового ферзя.',
+  cost: 3,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'slide', directions: ALL_DIRS, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'designatePromote',
+      description: 'Один раз: назначить пешку на превращение в ферзя.',
+    },
+  ],
+};
+
+/** Лечение союзника +1 HP в радиусе 3, КД 4. */
+export const hierophantDef: PieceDefinition = {
+  id: 'hierophant',
+  name: 'Кардинал',
+  baseRole: 'king',
+  isBase: false,
+  description:
+    'Модификация короля: обычные ходы. Вместо хода может дать +1 HP союзной фигуре в радиусе 3. Перезарядка 4 хода.',
+  cost: 5,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'leap', offsets: ALL_DIRS }],
+  abilities: [
+    {
+      id: 'blessHeal',
+      description: '+1 HP союзнику в радиусе 3. Перезарядка 4.',
+      cooldownTurns: 4,
+    },
+  ],
+};
+
+/** Раз отдать королевский титул ферзю. */
+export const dynastDef: PieceDefinition = {
+  id: 'dynast',
+  name: 'Династий',
+  baseRole: 'king',
+  isBase: false,
+  description:
+    'Модификация короля: обычные ходы. Один раз за партию может передать титул короля союзному ферзю. После этого для победы нужно уничтожить фигуру с титулом (ферзя), а не этого короля.',
+  cost: 6,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'leap', offsets: ALL_DIRS }],
+  abilities: [
+    {
+      id: 'abdicate',
+      description: 'Один раз: передать титул короля союзному ферзю.',
+    },
+  ],
+};
+
 export const PIECE_DEFS = [
   pawnDef,
   skirmisherDef,
   ironcladDef,
   spearmanDef,
+  ramDef,
+  bristlingDef,
   rookDef,
   sprinterDef,
   sentryDef,
+  aegisDef,
   knightDef,
   lancerDef,
   outriderDef,
+  courserDef,
   bishopDef,
   chaplainDef,
   exchangerDef,
+  bastionDef,
   queenDef,
   regentDef,
   cryomancerDef,
+  patronDef,
   kingDef,
   wardenDef,
   anchorDef,
+  hierophantDef,
+  dynastDef,
 ] as const;

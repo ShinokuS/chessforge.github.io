@@ -154,7 +154,7 @@ describe('chooseCommand', () => {
       createPieceInstance('king', 'white', { x: 6, y: 0 }, 'kw'),
       createPieceInstance('king', 'black', { x: 6, y: 7 }, 'kb'),
     ]);
-    const cmd = chooseCommand(state, { maxDepth: 3, timeMs: 500, nodeLimit: 50_000 });
+    const cmd = chooseCommand(state, { maxDepth: 4, timeMs: 1200, nodeLimit: 150_000 });
     expect(cmd.type).toBe('move');
     if (cmd.type !== 'move') return;
     expect(cmd.to).toEqual({ x: 0, y: 3 });

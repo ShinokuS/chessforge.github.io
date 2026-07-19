@@ -277,26 +277,172 @@ function Anchor({ owner }: { owner: PlayerId }) {
   );
 }
 
+/** Ram pawn — wedge battering head. */
+function Ram({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M22.5 6l6 12H16.5z" fill={c.accent} stroke={c.stroke} />
+      <path d="M15 19h15l-1.5 8H16.5z" />
+      <path d="M14 29h17l-2 6H16z" />
+      <path d="M12 37h21v4H12z" />
+      <path d="M10 22h4M31 22h4" stroke={c.accent} fill="none" strokeWidth={2} strokeLinecap="round" />
+    </Base>
+  );
+}
+
+/** Bristling pawn — thorns / reflect spikes. */
+function Bristling({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M22.5 10c-2 0-3.5 1.6-3.5 3.5 0 1.2.6 2.2 1.5 2.8C18 18 16 20.5 16 24v1h13V24c0-3.5-2-6-5-7.7.9-.6 1.5-1.6 1.5-2.8 0-1.9-1.5-3.5-3.5-3.5z" />
+      <path d="M13 36h19l-1.5-7H14.5z" />
+      <path d="M12 39h21v3H12z" />
+      <path
+        d="M12 18l-4-3M33 18l4-3M11 26l-4 1M34 26l4 1M14 14l-2-5M31 14l2-5"
+        stroke={c.accent}
+        fill="none"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+    </Base>
+  );
+}
+
+/** Courser knight — forward double-stride marks. */
+function Courser({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M14 38.5h21v3.5H12.5z" />
+      <path d="M13 34.5h19.5l-1.2-4.2c1.8-1.4 3.2-3.4 3.8-5.8.8-3.2-.2-6.4-2.8-8.7C29.5 13.2 26 11 22.2 11c-1.4 0-2.7.2-3.9.7L14 9.5v6.2l2.2 1.1c-.8 1.2-1.3 2.6-1.3 4.1 0 1.6.5 3 1.3 4.2L12.5 28c-.6 1.1-.8 2.3-.7 3.5z" />
+      <circle cx="20.5" cy="18.5" r="1.2" fill={c.stroke} stroke="none" />
+      <path
+        d="M28 8v6M31 8v6M28 9.5h3M28 12.5h3"
+        stroke={c.accent}
+        fill="none"
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+    </Base>
+  );
+}
+
+/** Bastion bishop — squat armored king-step body + HP plates. */
+function Bastion({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="22.5" cy="11" r="2.2" fill={c.accent} stroke={c.stroke} />
+      <path d="M14 16h17v6l-2 3v6H16v-6l-2-3z" />
+      <path d="M13 33h19l-1.5 3H14.5z" />
+      <path d="M12 38h21v4H12z" />
+      <path d="M17 20h11M17 24h11M17 28h11" stroke={c.accent} fill="none" strokeWidth={1.5} />
+    </Base>
+  );
+}
+
+/** Aegis rook — tower with shield face. */
+function Aegis({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M11 14.5h5.5V10H20v4.5h5V10h3.5v4.5H34V18l-2.2 3.5v9.5H13.2v-9.5L11 18z" />
+      <path d="M12.5 33.5h20l-1.5 3H14z" />
+      <path d="M11 38h23v4H11z" />
+      <path
+        d="M22.5 19.5c3.2 0 5.5 1.4 5.5 3.2v4.2c0 2.4-2.2 4.4-5.5 5.6-3.3-1.2-5.5-3.2-5.5-5.6v-4.2c0-1.8 2.3-3.2 5.5-3.2z"
+        fill={c.accent}
+        stroke={c.stroke}
+      />
+    </Base>
+  );
+}
+
+/** Patron queen — star above crown (designates promotion). */
+function Patron({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path
+        d="M22.5 5.5l1.1 2.4 2.6.3-1.9 1.8.5 2.6-2.3-1.3-2.3 1.3.5-2.6-1.9-1.8 2.6-.3z"
+        fill={c.accent}
+        stroke={c.stroke}
+      />
+      <circle cx="12" cy="15" r="1.8" />
+      <circle cx="22.5" cy="13" r="1.8" />
+      <circle cx="33" cy="15" r="1.8" />
+      <path d="M12 17 14.8 29h15.4L33 17 27 23.5 22.5 16 18 23.5z" />
+      <path d="M14.5 31.5h16l-1.4 3.5h-13.2z" />
+      <path d="M12 38.5h21v3.5H12z" />
+    </Base>
+  );
+}
+
+/** Hierophant king — cross + heal spark. */
+function Hierophant({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M20.5 7h4v2.5h2.5v3H24.5V16h-4v-3.5H18V9.5h2.5z" fill={c.accent} stroke={c.stroke} />
+      <path d="M13.5 20.5c0-3.2 4-5.5 9-5.5s9 2.3 9 5.5c0 4.5-3.2 7.2-5.2 10.5H18.7c-2-3.3-5.2-6-5.2-10.5z" />
+      <path d="M14.5 33.5h16l-1.5 3H16z" />
+      <path d="M12 38.5h21v3.5H12z" />
+      <path
+        d="M32 22v6M29 25h6"
+        stroke={c.accent}
+        fill="none"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+    </Base>
+  );
+}
+
+/** Dynast king — split crown / transferred title. */
+function Dynast({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M16 9h4v3h2.5v3H20v3h-4v-3h-2.5v-3H16z" />
+      <path d="M27 9h4v3h2.5v3H31v3h-4v-3h-2.5v-3H27z" fill={c.accent} stroke={c.stroke} />
+      <path d="M13.5 22c0-2.8 4-5 9-5s9 2.2 9 5c0 4-3 6.5-5 9.5H18.5c-2-3-5-5.5-5-9.5z" />
+      <path d="M14.5 33.5h16l-1.5 3H16z" />
+      <path d="M12 38.5h21v3.5H12z" />
+      <path d="M22.5 24v6" stroke={c.accent} fill="none" strokeWidth={1.6} strokeLinecap="round" />
+    </Base>
+  );
+}
+
 const ICONS: Record<string, (props: { owner: PlayerId }) => ReactElement> = {
   pawn: Pawn,
   skirmisher: Skirmisher,
   ironclad: Ironclad,
   spearman: Spearman,
+  ram: Ram,
+  bristling: Bristling,
   rook: Rook,
   sprinter: Sprinter,
   sentry: Sentry,
+  aegis: Aegis,
   knight: Knight,
   lancer: Lancer,
   outrider: Outrider,
+  courser: Courser,
   bishop: Bishop,
   chaplain: Chaplain,
   exchanger: Exchanger,
+  bastion: Bastion,
   queen: Queen,
   regent: Regent,
   cryomancer: Cryomancer,
+  patron: Patron,
   king: King,
   warden: Warden,
   anchor: Anchor,
+  hierophant: Hierophant,
+  dynast: Dynast,
 };
 
 export function PieceIcon({ defId, owner, className }: PieceIconProps) {
