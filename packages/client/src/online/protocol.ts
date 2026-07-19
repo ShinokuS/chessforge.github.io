@@ -1,8 +1,14 @@
-import type { FormationPlacement, GameCommand, PlayerId } from '@chessforge/engine';
+import type {
+  FormationPlacement,
+  GameCommand,
+  MatchState,
+  PlayerId,
+} from '@chessforge/engine';
 
 /** Messages over PeerJS data connection (host is authoritative regardless of color). */
 export type PeerMessage =
   | { type: 'guestHello'; placements: FormationPlacement[] }
+  | { type: 'guestRejoin' }
   | {
       type: 'matchStart';
       roomId: string;
@@ -12,8 +18,17 @@ export type PeerMessage =
       clockMs: number;
       yourColor: PlayerId;
     }
+  | {
+      type: 'resync';
+      roomId: string;
+      state: MatchState;
+      clockMs: number;
+      yourColor: PlayerId;
+    }
   | { type: 'command'; command: GameCommand; by: PlayerId }
   | { type: 'commandRequest'; command: GameCommand }
+  | { type: 'ping'; t: number }
+  | { type: 'pong'; t: number }
   | { type: 'error'; message: string }
   | { type: 'opponentLeft' };
 

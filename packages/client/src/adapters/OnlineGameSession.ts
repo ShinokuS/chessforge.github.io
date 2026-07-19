@@ -19,12 +19,21 @@ import {
 import { validatePlacements } from '../online/validate';
 import { resolveSide, type SidePreference } from '../battle/settings';
 import { INITIAL_CLOCK_MS } from '../battle/clock';
+import {
+  HEARTBEAT_MS,
+  HEARTBEAT_TIMEOUT_MS,
+  JOIN_TIMEOUT_MS,
+  RECONNECT_ATTEMPTS,
+  RECONNECT_BASE_DELAY_MS,
+  peerClientOptions,
+} from '../online/peerConfig';
 
 export type OnlineStatus =
   | 'idle'
   | 'connecting'
   | 'waiting'
   | 'playing'
+  | 'reconnecting'
   | 'disconnected'
   | 'error';
 
@@ -36,14 +45,21 @@ export type CreateRoomOptions = {
 type PeerCtor = new (...args: any[]) => PeerInstance;
 
 type PeerInstance = {
+  id: string;
+  disconnected: boolean;
+  destroyed: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, cb: (...args: any[]) => void): void;
-  connect(id: string, options?: { reliable?: boolean }): DataConn;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  off?(event: string, cb: (...args: any[]) => void): void;
+  connect(id: string, options?: { reliable?: boolean; serialization?: string }): DataConn;
+  reconnect(): void;
   destroy(): void;
 };
 
 type DataConn = {
   open: boolean;
+  peer: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   on(event: string, cb: (...args: any[]) => void): void;
   send(data: unknown): void;
@@ -65,9 +81,13 @@ async function loadPeer(): Promise<PeerCtor> {
   throw new Error('PeerJS не загрузился');
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 /**
  * P2P online session via PeerJS.
- * Host is authoritative regardless of board color. Each side brings its own deck.
+ * Host is authoritative. Includes TURN, signaling reconnect, heartbeat and resync.
  */
 export class OnlineGameSession {
   private state: MatchState = createDemoMatch();
@@ -79,13 +99,20 @@ export class OnlineGameSession {
   private statusListeners = new Set<() => void>();
   private matchClockMs = INITIAL_CLOCK_MS;
   private hostSide: SidePreference = 'white';
-  /** Color assigned to host at room creation (including resolved random). */
   private hostColor: PlayerId = 'white';
 
   private peer: PeerInstance | null = null;
   private conn: DataConn | null = null;
   private hostPlacements: FormationPlacement[] | null = null;
+  private guestPlacements: FormationPlacement[] | null = null;
   private isHost = false;
+  private intentionalLeave = false;
+  private reconnecting = false;
+  private matchStarted = false;
+
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private lastPongAt = 0;
+  private PeerCtor: PeerCtor | null = null;
 
   getState(): MatchState {
     return this.state;
@@ -148,21 +175,93 @@ export class OnlineGameSession {
   }
 
   private fail(message: string): void {
+    this.stopHeartbeat();
     this.lastError = message;
     this.setStatus('error');
     this.emit([]);
   }
 
-  private send(msg: PeerMessage): void {
-    if (!this.conn?.open) {
-      this.fail('Нет соединения с соперником');
-      return;
+  private trySend(msg: PeerMessage): boolean {
+    if (!this.conn?.open) return false;
+    try {
+      this.conn.send(msg);
+      return true;
+    } catch {
+      return false;
     }
-    this.conn.send(msg);
+  }
+
+  private send(msg: PeerMessage): void {
+    if (!this.trySend(msg)) {
+      if (this.status === 'playing' || this.status === 'reconnecting') {
+        void this.beginReconnect('Нет соединения с соперником — переподключение…');
+        return;
+      }
+      this.fail('Нет соединения с соперником');
+    }
   }
 
   private guestColor(): PlayerId {
     return this.myColor === 'white' ? 'black' : 'white';
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    this.lastPongAt = Date.now();
+    this.heartbeatTimer = setInterval(() => {
+      if (this.intentionalLeave || this.reconnecting) return;
+      if (this.status !== 'playing' && this.status !== 'waiting') return;
+      if (!this.conn?.open) {
+        void this.beginReconnect('Канал закрыт — переподключение…');
+        return;
+      }
+      if (Date.now() - this.lastPongAt > HEARTBEAT_TIMEOUT_MS) {
+        void this.beginReconnect('Связь потеряна — переподключение…');
+        return;
+      }
+      this.trySend({ type: 'ping', t: Date.now() });
+    }, HEARTBEAT_MS);
+  }
+
+  private bindPeerLifecycle(peer: PeerInstance): void {
+    peer.on('disconnected', () => {
+      if (this.intentionalLeave || peer.destroyed) return;
+      if (this.status === 'idle' || this.status === 'error') return;
+      this.lastError = 'Сигнальный сервер недоступен — переподключение…';
+      this.setStatus(
+        this.status === 'waiting' || this.status === 'playing' || this.status === 'reconnecting'
+          ? 'reconnecting'
+          : this.status,
+      );
+      this.emit([]);
+      try {
+        peer.reconnect();
+      } catch {
+        void this.beginReconnect('Не удалось восстановить сигнал');
+      }
+    });
+
+    peer.on('error', (err: unknown) => {
+      if (this.intentionalLeave) return;
+      const msg =
+        err && typeof err === 'object' && 'type' in err
+          ? String((err as { type: string }).type)
+          : '';
+      // peer-unavailable etc. during reconnect — handled by retry loop
+      if (msg === 'peer-unavailable' || msg === 'network' || msg === 'server-error') {
+        if (this.status === 'playing' || this.status === 'reconnecting' || this.status === 'waiting') {
+          void this.beginReconnect('Сбой сети — переподключение…');
+          return;
+        }
+      }
+    });
   }
 
   private bindConnection(conn: DataConn): void {
@@ -171,18 +270,46 @@ export class OnlineGameSession {
       this.onPeerMessage(raw as PeerMessage);
     });
     conn.on('close', () => {
-      if (this.status === 'playing' || this.status === 'waiting') {
-        this.lastError = 'Соперник отключился';
-        this.setStatus('disconnected');
-        this.emit([]);
+      if (this.intentionalLeave) return;
+      if (this.conn !== conn) return;
+      if (this.status === 'playing' || this.status === 'waiting' || this.status === 'reconnecting') {
+        void this.beginReconnect('Соединение оборвалось — переподключение…');
       }
     });
     conn.on('error', () => {
-      this.fail('Ошибка канала связи');
+      if (this.intentionalLeave) return;
+      if (this.status === 'playing' || this.status === 'waiting') {
+        void this.beginReconnect('Ошибка канала — переподключение…');
+      }
+    });
+    this.startHeartbeat();
+  }
+
+  private cloneState(state: MatchState): MatchState {
+    return structuredClone(state);
+  }
+
+  private sendResync(): void {
+    if (!this.isHost || !this.roomId || !this.myColor) return;
+    this.trySend({
+      type: 'resync',
+      roomId: this.roomId,
+      state: this.cloneState(this.state),
+      clockMs: this.matchClockMs,
+      yourColor: this.guestColor(),
     });
   }
 
   private onPeerMessage(msg: PeerMessage): void {
+    if (msg.type === 'ping') {
+      this.trySend({ type: 'pong', t: msg.t });
+      return;
+    }
+    if (msg.type === 'pong') {
+      this.lastPongAt = Date.now();
+      return;
+    }
+
     if (msg.type === 'error') {
       this.lastError = msg.message;
       this.emit([]);
@@ -197,6 +324,16 @@ export class OnlineGameSession {
       }
       if (!this.hostPlacements || !this.roomId) return;
 
+      if (this.matchStarted) {
+        // Late hello while match already running → treat as rejoin
+        this.guestPlacements = msg.placements;
+        this.sendResync();
+        this.lastError = null;
+        this.setStatus('playing');
+        this.emit([]);
+        return;
+      }
+
       const seed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
       const hostColor = this.hostColor;
       const guestColor: PlayerId = hostColor === 'white' ? 'black' : 'white';
@@ -205,8 +342,10 @@ export class OnlineGameSession {
       const black =
         hostColor === 'white' ? msg.placements : this.hostPlacements;
 
+      this.guestPlacements = msg.placements;
       this.state = createMatchFromPlacements(white, black, seed);
       this.myColor = hostColor;
+      this.matchStarted = true;
       this.lastError = null;
       this.setStatus('playing');
       this.send({
@@ -222,11 +361,35 @@ export class OnlineGameSession {
       return;
     }
 
+    if (msg.type === 'guestRejoin' && this.isHost) {
+      if (!this.matchStarted) return;
+      this.sendResync();
+      this.lastError = null;
+      if (this.status === 'reconnecting') this.setStatus('playing');
+      this.emit([]);
+      return;
+    }
+
     if (msg.type === 'matchStart' && !this.isHost) {
       this.roomId = msg.roomId;
       this.myColor = msg.yourColor;
       this.matchClockMs = msg.clockMs > 0 ? msg.clockMs : INITIAL_CLOCK_MS;
       this.state = createMatchFromPlacements(msg.white, msg.black, msg.seed);
+      this.matchStarted = true;
+      this.reconnecting = false;
+      this.lastError = null;
+      this.setStatus('playing');
+      this.emit([]);
+      return;
+    }
+
+    if (msg.type === 'resync' && !this.isHost) {
+      this.roomId = msg.roomId;
+      this.myColor = msg.yourColor;
+      this.matchClockMs = msg.clockMs > 0 ? msg.clockMs : INITIAL_CLOCK_MS;
+      this.state = this.cloneState(msg.state);
+      this.matchStarted = true;
+      this.reconnecting = false;
       this.lastError = null;
       this.setStatus('playing');
       this.emit([]);
@@ -267,25 +430,236 @@ export class OnlineGameSession {
     }
 
     if (msg.type === 'opponentLeft') {
+      this.intentionalLeave = true;
+      this.stopHeartbeat();
       this.lastError = 'Соперник покинул комнату';
       this.setStatus('disconnected');
       this.emit([]);
     }
   }
 
-  private destroyPeer(): void {
+  private closeConnOnly(): void {
+    this.stopHeartbeat();
     try {
       this.conn?.close();
     } catch {
       /* ignore */
     }
+    this.conn = null;
+  }
+
+  private destroyPeer(): void {
+    this.stopHeartbeat();
+    this.closeConnOnly();
     try {
       this.peer?.destroy();
     } catch {
       /* ignore */
     }
-    this.conn = null;
     this.peer = null;
+  }
+
+  private async ensurePeerCtor(): Promise<PeerCtor> {
+    if (this.PeerCtor) return this.PeerCtor;
+    this.PeerCtor = await loadPeer();
+    return this.PeerCtor;
+  }
+
+  private async beginReconnect(reason: string): Promise<void> {
+    if (this.intentionalLeave || this.reconnecting) return;
+    if (this.status === 'idle' || this.status === 'error' || this.status === 'disconnected') {
+      return;
+    }
+    // Waiting host: keep peer alive, only refresh signaling
+    if (this.isHost && this.status === 'waiting' && this.peer && !this.peer.destroyed) {
+      this.lastError = reason;
+      this.setStatus('reconnecting');
+      this.emit([]);
+      try {
+        if (this.peer.disconnected) this.peer.reconnect();
+      } catch {
+        /* ignore */
+      }
+      // Host waiting doesn't need data conn yet
+      setTimeout(() => {
+        if (this.intentionalLeave) return;
+        if (this.status === 'reconnecting' && this.isHost && !this.matchStarted) {
+          this.lastError = null;
+          this.setStatus('waiting');
+          this.emit([]);
+        }
+      }, 2_000);
+      return;
+    }
+
+    this.reconnecting = true;
+    this.lastError = reason;
+    this.setStatus('reconnecting');
+    this.emit([]);
+    this.closeConnOnly();
+
+    for (let attempt = 0; attempt < RECONNECT_ATTEMPTS; attempt++) {
+      if (this.intentionalLeave) return;
+      const delay = RECONNECT_BASE_DELAY_MS * Math.pow(1.5, attempt);
+      await sleep(delay);
+      if (this.intentionalLeave) return;
+
+      try {
+        if (this.isHost) {
+          await this.reconnectAsHost();
+        } else {
+          await this.reconnectAsGuest();
+        }
+        this.reconnecting = false;
+        this.lastError = null;
+        this.setStatus(this.matchStarted ? 'playing' : 'waiting');
+        this.emit([]);
+        return;
+      } catch {
+        // try again
+      }
+    }
+
+    this.reconnecting = false;
+    this.lastError = 'Не удалось восстановить соединение. Выйдите и зайдите снова.';
+    this.setStatus('disconnected');
+    this.emit([]);
+  }
+
+  private async reconnectAsHost(): Promise<void> {
+    if (!this.roomId || !this.hostPlacements) {
+      throw new Error('no room');
+    }
+    const Peer = await this.ensurePeerCtor();
+
+    // Prefer signaling reconnect on same peer id (room code)
+    if (this.peer && !this.peer.destroyed) {
+      if (this.peer.disconnected) {
+        await new Promise<void>((resolve, reject) => {
+          const t = setTimeout(() => reject(new Error('signal timeout')), 10_000);
+          const onOpen = () => {
+            clearTimeout(t);
+            resolve();
+          };
+          this.peer!.on('open', onOpen);
+          try {
+            this.peer!.reconnect();
+          } catch (e) {
+            clearTimeout(t);
+            reject(e);
+          }
+        });
+      }
+      // Wait for guest to connect again — host connection handler already set
+      // If we already have open conn, done
+      if (this.conn?.open) return;
+
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => reject(new Error('guest timeout')), 12_000);
+        const check = setInterval(() => {
+          if (this.conn?.open) {
+            clearInterval(check);
+            clearTimeout(t);
+            if (this.matchStarted) this.sendResync();
+            resolve();
+          }
+        }, 200);
+      });
+      return;
+    }
+
+    // Recreate peer with same room id
+    const peer = new Peer(peerIdForRoom(this.roomId), peerClientOptions());
+    this.peer = peer;
+    this.bindPeerLifecycle(peer);
+
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('open timeout')), 12_000);
+      peer.on('open', () => {
+        clearTimeout(t);
+        resolve();
+      });
+      peer.on('error', (e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+    });
+
+    peer.on('connection', (conn) => {
+      if (this.conn?.open) {
+        // Replace stale connection
+        try {
+          this.conn.close();
+        } catch {
+          /* ignore */
+        }
+      }
+      this.bindConnection(conn);
+      conn.on('open', () => {
+        if (this.matchStarted) this.sendResync();
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('guest timeout')), 15_000);
+      const check = setInterval(() => {
+        if (this.conn?.open) {
+          clearInterval(check);
+          clearTimeout(t);
+          resolve();
+        }
+      }, 200);
+    });
+  }
+
+  private async reconnectAsGuest(): Promise<void> {
+    if (!this.roomId || !this.guestPlacements) {
+      throw new Error('no room');
+    }
+    const Peer = await this.ensurePeerCtor();
+    this.destroyPeer();
+
+    const peer = new Peer(peerClientOptions());
+    this.peer = peer;
+    this.bindPeerLifecycle(peer);
+
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('open timeout')), 12_000);
+      peer.on('open', () => {
+        clearTimeout(t);
+        resolve();
+      });
+      peer.on('error', (e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+    });
+
+    const conn = peer.connect(peerIdForRoom(this.roomId), {
+      reliable: true,
+      serialization: 'json',
+    });
+    this.bindConnection(conn);
+
+    await new Promise<void>((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('connect timeout')), JOIN_TIMEOUT_MS);
+      conn.on('open', () => {
+        clearTimeout(t);
+        resolve();
+      });
+      conn.on('error', (e) => {
+        clearTimeout(t);
+        reject(e);
+      });
+    });
+
+    if (this.matchStarted) {
+      this.send({ type: 'guestRejoin' });
+      // Wait briefly for resync
+      await sleep(500);
+    } else {
+      this.send({ type: 'guestHello', placements: this.guestPlacements });
+    }
   }
 
   async createRoom(
@@ -299,17 +673,20 @@ export class OnlineGameSession {
     }
 
     this.disconnect();
+    this.intentionalLeave = false;
     this.isHost = true;
     this.hostPlacements = placements;
+    this.guestPlacements = null;
     this.hostSide = options.side;
     this.hostColor = resolveSide(options.side);
     this.matchClockMs = options.clockMs > 0 ? options.clockMs : INITIAL_CLOCK_MS;
     this.myColor = this.hostColor;
+    this.matchStarted = false;
     this.setStatus('connecting');
 
     let Peer: PeerCtor;
     try {
-      Peer = await loadPeer();
+      Peer = await this.ensurePeerCtor();
     } catch (e) {
       this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
       return;
@@ -318,13 +695,21 @@ export class OnlineGameSession {
     let lastError: unknown;
     for (let attempt = 0; attempt < 6; attempt++) {
       const roomId = randomRoomCode();
-      const peer = new Peer(peerIdForRoom(roomId), { debug: 0 });
+      const peer = new Peer(peerIdForRoom(roomId), peerClientOptions());
       this.peer = peer;
+      this.bindPeerLifecycle(peer);
 
       try {
         await new Promise<void>((resolve, reject) => {
-          peer.on('open', () => resolve());
-          peer.on('error', (e) => reject(e));
+          const t = setTimeout(() => reject(new Error('Таймаут сигнального сервера')), 15_000);
+          peer.on('open', () => {
+            clearTimeout(t);
+            resolve();
+          });
+          peer.on('error', (e) => {
+            clearTimeout(t);
+            reject(e);
+          });
         });
 
         this.roomId = roomId;
@@ -342,19 +727,14 @@ export class OnlineGameSession {
         this.emit([]);
 
         peer.on('connection', (conn) => {
-          if (this.conn?.open) {
-            conn.close();
-            return;
+          if (this.conn?.open && this.conn !== conn) {
+            try {
+              this.conn.close();
+            } catch {
+              /* ignore */
+            }
           }
           this.bindConnection(conn);
-        });
-
-        peer.on('disconnected', () => {
-          if (this.status === 'waiting' || this.status === 'playing') {
-            this.lastError = 'Потеряно соединение с сетью PeerJS';
-            this.setStatus('disconnected');
-            this.emit([]);
-          }
         });
         return;
       } catch (e) {
@@ -389,41 +769,55 @@ export class OnlineGameSession {
     }
 
     this.disconnect();
+    this.intentionalLeave = false;
     this.isHost = false;
     this.hostPlacements = null;
+    this.guestPlacements = placements;
     this.myColor = null;
     this.roomId = code;
+    this.matchStarted = false;
     this.setStatus('connecting');
 
     let Peer: PeerCtor;
     try {
-      Peer = await loadPeer();
+      Peer = await this.ensurePeerCtor();
     } catch (e) {
       this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
       return;
     }
 
-    const peer = new Peer({ debug: 0 });
+    const peer = new Peer(peerClientOptions());
     this.peer = peer;
+    this.bindPeerLifecycle(peer);
 
     try {
       await new Promise<void>((resolve, reject) => {
-        peer.on('open', () => resolve());
-        peer.on('error', (e) => reject(e));
+        const t = setTimeout(() => reject(new Error('Таймаут сигнального сервера')), 15_000);
+        peer.on('open', () => {
+          clearTimeout(t);
+          resolve();
+        });
+        peer.on('error', (e) => {
+          clearTimeout(t);
+          reject(e);
+        });
       });
     } catch (e) {
       this.fail(e instanceof Error ? e.message : 'Не удалось подключиться');
       return;
     }
 
-    const conn = peer.connect(peerIdForRoom(code), { reliable: true });
+    const conn = peer.connect(peerIdForRoom(code), {
+      reliable: true,
+      serialization: 'json',
+    });
     this.bindConnection(conn);
 
     try {
       await new Promise<void>((resolve, reject) => {
         const t = setTimeout(() => {
           reject(new Error('Комната не отвечает. Проверьте код и что хост ещё ждёт.'));
-        }, 15_000);
+        }, JOIN_TIMEOUT_MS);
         conn.on('open', () => {
           clearTimeout(t);
           resolve();
@@ -442,6 +836,11 @@ export class OnlineGameSession {
   }
 
   submitCommand(command: GameCommand): boolean {
+    if (this.status === 'reconnecting') {
+      this.lastError = 'Переподключение… подождите';
+      this.emit([]);
+      return false;
+    }
     if (this.status !== 'playing' || !this.myColor) {
       this.lastError = 'Матч не активен';
       this.emit([]);
@@ -471,7 +870,6 @@ export class OnlineGameSession {
     return true;
   }
 
-  /** Local clock timeout — ends the match on this client. */
   endByTimeout(winner: PlayerId): void {
     if (this.status !== 'playing' || this.state.phase !== 'play') return;
     this.state = { ...this.state, phase: 'gameOver', winner };
@@ -480,6 +878,9 @@ export class OnlineGameSession {
   }
 
   disconnect(): void {
+    this.intentionalLeave = true;
+    this.reconnecting = false;
+    this.matchStarted = false;
     if (this.conn?.open) {
       try {
         this.conn.send({ type: 'opponentLeft' } satisfies PeerMessage);
@@ -491,6 +892,7 @@ export class OnlineGameSession {
     this.roomId = null;
     this.myColor = null;
     this.hostPlacements = null;
+    this.guestPlacements = null;
     this.isHost = false;
     this.hostSide = 'white';
     this.hostColor = 'white';

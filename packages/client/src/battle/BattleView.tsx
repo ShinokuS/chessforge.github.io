@@ -93,6 +93,8 @@ export function BattleView() {
             }`
           : onlineStatus === 'connecting'
             ? 'Подключение…'
+            : onlineStatus === 'reconnecting'
+              ? 'Переподключение…'
             : onlineStatus === 'disconnected'
               ? 'Соединение потеряно'
               : 'Онлайн-лобби'
@@ -114,11 +116,13 @@ export function BattleView() {
     (battleMode === 'ai' && (aiPlaying || Boolean(endBanner) || state.phase === 'gameOver')) ||
     onlineStatus === 'waiting' ||
     onlineStatus === 'playing' ||
+    onlineStatus === 'reconnecting' ||
     (battleMode === 'online' && state.phase === 'gameOver');
 
   const showClocks =
     (battleMode === 'ai' && aiPlaying) ||
     onlineStatus === 'playing' ||
+    onlineStatus === 'reconnecting' ||
     Boolean(endBanner) ||
     (battleMode === 'online' && state.phase === 'gameOver');
 
@@ -217,6 +221,7 @@ export function BattleView() {
         {(aiPlaying ||
           onlineStatus === 'waiting' ||
           onlineStatus === 'playing' ||
+          onlineStatus === 'reconnecting' ||
           onlineStatus === 'connecting') && (
           <button type="button" className={styles.restart} onClick={restart}>
             {battleMode === 'online' ? 'Выйти / сброс' : 'В лобби'}
