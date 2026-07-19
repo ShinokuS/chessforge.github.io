@@ -65,57 +65,57 @@
 }
 
 .swatchMud {
-  background: var(--dark-sq);
+  background: color-mix(in srgb, #6e4a22 48%, var(--dark-sq));
   background-image: repeating-linear-gradient(
     -45deg,
     transparent,
-    transparent 5px,
-    rgba(40, 30, 12, 0.25) 5px,
-    rgba(40, 30, 12, 0.25) 10px
+    transparent 4px,
+    rgba(92, 58, 18, 0.4) 4px,
+    rgba(92, 58, 18, 0.4) 9px
   );
 }
 
 .swatchSpikes {
-  background: var(--light-sq);
-  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--danger) 70%, transparent);
+  background: color-mix(in srgb, #e07058 30%, var(--light-sq));
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--danger) 88%, #ff6b4a);
 }
 
 .swatchMountain {
-  background: linear-gradient(160deg, #8a9a78, #5a6b45);
+  background: linear-gradient(160deg, #b8c898, #5a6b45);
 }
 
 .swatchCave {
-  background: var(--dark-sq);
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, #1a1410 55%, transparent);
+  background: color-mix(in srgb, #2a2018 55%, var(--dark-sq));
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, #0e0a08 75%, transparent);
 }
 
 .swatchLake {
-  background: color-mix(in srgb, #4a6570 55%, var(--dark-sq));
+  background: color-mix(in srgb, #3d8aa8 62%, var(--dark-sq));
 }
 
 .swatchWind {
-  background: var(--light-sq);
+  background: color-mix(in srgb, #b8dff0 38%, var(--light-sq));
   background-image: repeating-linear-gradient(
     90deg,
     transparent,
-    transparent 4px,
-    color-mix(in srgb, #9ec9e0 45%, transparent) 4px,
-    color-mix(in srgb, #9ec9e0 45%, transparent) 7px
+    transparent 3px,
+    color-mix(in srgb, #7ec8ef 55%, transparent) 3px,
+    color-mix(in srgb, #7ec8ef 55%, transparent) 6px
   );
 }
 
 .swatchForest {
   background:
-    radial-gradient(circle at 50% 62%, color-mix(in srgb, #3d6b45 55%, transparent), transparent 68%),
-    var(--dark-sq);
+    radial-gradient(circle at 50% 58%, color-mix(in srgb, #2f8a45 60%, transparent), transparent 72%),
+    color-mix(in srgb, #2d5a35 52%, var(--dark-sq));
 }
 
 .swatchMushroom {
-  background: var(--light-sq);
-  box-shadow: inset 0 0 0 3px color-mix(in srgb, #c45a7a 55%, transparent);
+  background: color-mix(in srgb, #d888a8 32%, var(--light-sq));
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, #e06090 80%, transparent);
   background-image: radial-gradient(
-    circle at 50% 48%,
-    color-mix(in srgb, #c45a7a 40%, transparent) 0 28%,
-    transparent 30%
+    circle at 50% 45%,
+    color-mix(in srgb, #e070a0 50%, transparent) 0 32%,
+    transparent 34%
   );
 }

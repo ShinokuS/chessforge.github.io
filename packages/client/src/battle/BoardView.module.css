@@ -75,19 +75,36 @@
   background-image: repeating-linear-gradient(
     -45deg,
     transparent,
-    transparent 5px,
-    rgba(40, 30, 12, 0.16) 5px,
-    rgba(40, 30, 12, 0.16) 10px
+    transparent 4px,
+    rgba(92, 58, 18, 0.38) 4px,
+    rgba(92, 58, 18, 0.38) 9px
   );
   pointer-events: none;
+}
+
+.mud.light {
+  background-color: color-mix(in srgb, #a07840 42%, var(--light-sq)) !important;
+}
+
+.mud.dark {
+  background-color: color-mix(in srgb, #6e4a22 48%, var(--dark-sq)) !important;
 }
 
 .spikes::before {
   content: '';
   position: absolute;
-  inset: 3px;
-  border: 2px solid color-mix(in srgb, var(--danger) 70%, transparent);
+  inset: 2px;
+  border: 2px solid color-mix(in srgb, var(--danger) 88%, #ff6b4a);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 45%, transparent);
   pointer-events: none;
+}
+
+.spikes.light {
+  background-color: color-mix(in srgb, #e07058 28%, var(--light-sq)) !important;
+}
+
+.spikes.dark {
+  background-color: color-mix(in srgb, #b04030 34%, var(--dark-sq)) !important;
 }
 
 .mountain::before {
@@ -96,23 +113,45 @@
   inset: 0;
   background: linear-gradient(
     160deg,
-    color-mix(in srgb, #c4b48a 28%, transparent),
-    transparent 60%
+    color-mix(in srgb, #d4c49a 55%, transparent),
+    color-mix(in srgb, #6a7a52 40%, transparent) 55%,
+    transparent 75%
   );
   pointer-events: none;
+}
+
+.mountain.light {
+  background-color: color-mix(in srgb, #9aaa78 40%, var(--light-sq)) !important;
+}
+
+.mountain.dark {
+  background-color: color-mix(in srgb, #5a6b45 48%, var(--dark-sq)) !important;
 }
 
 .cave::before {
   content: '';
   position: absolute;
-  inset: 22%;
-  border: 2px solid color-mix(in srgb, #1a1410 50%, transparent);
+  inset: 18%;
+  border: 2px solid color-mix(in srgb, #0e0a08 75%, transparent);
   border-radius: 2px;
+  background: color-mix(in srgb, #1a1410 28%, transparent);
   pointer-events: none;
 }
 
+.cave.light {
+  background-color: color-mix(in srgb, #5a4a3a 35%, var(--light-sq)) !important;
+}
+
+.cave.dark {
+  background-color: color-mix(in srgb, #2a2018 55%, var(--dark-sq)) !important;
+}
+
 .lake {
-  background-color: color-mix(in srgb, #4a6570 55%, var(--dark-sq)) !important;
+  background-color: color-mix(in srgb, #3d8aa8 62%, var(--dark-sq)) !important;
+}
+
+.lake.light {
+  background-color: color-mix(in srgb, #5eb0c8 58%, var(--light-sq)) !important;
 }
 
 .wind::before {
@@ -122,11 +161,19 @@
   background: repeating-linear-gradient(
     90deg,
     transparent,
-    transparent 4px,
-    color-mix(in srgb, #9ec9e0 22%, transparent) 4px,
-    color-mix(in srgb, #9ec9e0 22%, transparent) 6px
+    transparent 3px,
+    color-mix(in srgb, #7ec8ef 48%, transparent) 3px,
+    color-mix(in srgb, #7ec8ef 48%, transparent) 6px
   );
   pointer-events: none;
+}
+
+.wind.light {
+  background-color: color-mix(in srgb, #b8dff0 38%, var(--light-sq)) !important;
+}
+
+.wind.dark {
+  background-color: color-mix(in srgb, #4a8aaa 42%, var(--dark-sq)) !important;
 }
 
 .forest::before {
@@ -134,20 +181,42 @@
   position: absolute;
   inset: 0;
   background: radial-gradient(
-    circle at 50% 60%,
-    color-mix(in srgb, #3d6b45 35%, transparent),
-    transparent 70%
+    circle at 50% 58%,
+    color-mix(in srgb, #2f8a45 55%, transparent),
+    color-mix(in srgb, #1e5a30 30%, transparent) 55%,
+    transparent 78%
   );
   pointer-events: none;
+}
+
+.forest.light {
+  background-color: color-mix(in srgb, #5a9a62 40%, var(--light-sq)) !important;
+}
+
+.forest.dark {
+  background-color: color-mix(in srgb, #2d5a35 52%, var(--dark-sq)) !important;
 }
 
 .mushroom::before {
   content: '';
   position: absolute;
-  inset: 18%;
+  inset: 16%;
   border-radius: 50%;
-  border: 2px solid color-mix(in srgb, #c45a7a 55%, transparent);
+  border: 2px solid color-mix(in srgb, #e06090 80%, transparent);
+  background: radial-gradient(
+    circle at 50% 45%,
+    color-mix(in srgb, #e070a0 45%, transparent) 0 40%,
+    transparent 42%
+  );
   pointer-events: none;
+}
+
+.mushroom.light {
+  background-color: color-mix(in srgb, #d888a8 32%, var(--light-sq)) !important;
+}
+
+.mushroom.dark {
+  background-color: color-mix(in srgb, #8a4060 38%, var(--dark-sq)) !important;
 }
 
 .shieldAura {
@@ -245,14 +314,18 @@
 
 .tileMark {
   position: absolute;
-  bottom: 3px;
-  right: 4px;
+  top: 2px;
+  left: 3px;
   z-index: 1;
-  font-size: 0.65rem;
+  font-size: clamp(0.85rem, 2.4vmin, 1.15rem);
   line-height: 1;
-  opacity: 0.5;
-  color: #2a2418;
+  opacity: 0.92;
+  color: #1a140c;
+  text-shadow:
+    0 0 2px color-mix(in srgb, var(--light-sq) 80%, #fff),
+    0 1px 0 color-mix(in srgb, var(--light-sq) 70%, transparent);
   pointer-events: none;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.35));
 }
 
 .inspect {

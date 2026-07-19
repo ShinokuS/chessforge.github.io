@@ -1,13 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import styles from './BattleView.module.css';
 import { BoardView } from './BoardView';
 import { formatClock } from './clock';
+import { groupHistoryForDisplay } from './moveHistory';
 import {
-  AI_STRENGTH,
+  aiSearchProfile,
   SIDE_OPTIONS,
   TIME_PRESETS,
   timePresetMs,
-  type AiStrength,
   type SidePreference,
   type TimePresetId,
 } from './settings';
@@ -75,6 +75,15 @@ export function BattleView() {
   });
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  const historyBlocks = useMemo(() => groupHistoryForDisplay(moveHistory), [moveHistory]);
+  const lastPly = moveHistory.reduce((max, e) => (e.kind === 'ply' ? Math.max(max, e.ply) : max), 0);
+  const historyScrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = historyScrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [moveHistory]);
 
   const onlineStatus = online.getStatus();
   const roomId = online.getRoomId();
@@ -239,21 +248,19 @@ export function BattleView() {
             </select>
           </label>
 
-          <fieldset className={styles.optionGroup}>
-            <legend>Сила ИИ</legend>
-            <div className={styles.optionRow}>
-              {(Object.keys(AI_STRENGTH) as AiStrength[]).map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  className={aiStrength === id ? styles.optionActive : undefined}
-                  onClick={() => setAiStrength(id)}
-                >
-                  {AI_STRENGTH[id].label}
-                </button>
-              ))}
-            </div>
-          </fieldset>
+          <label className={styles.lobbyField}>
+            Сила ИИ · {aiStrength}/10
+            <input
+              type="range"
+              className={styles.strengthSlider}
+              min={0}
+              max={10}
+              step={1}
+              value={aiStrength}
+              onChange={(e) => setAiStrength(Number(e.target.value))}
+            />
+            <span className={styles.sliderHint}>{aiSearchProfile(aiStrength).hint}</span>
+          </label>
 
           <fieldset className={styles.optionGroup}>
             <legend>Время на сторону</legend>
@@ -272,9 +279,8 @@ export function BattleView() {
           </fieldset>
 
           <p className={styles.lobbyHint}>
-            Вы белые · колода «{activeDeck?.name ?? '—'}» · ИИ:{' '}
-            {AI_STRENGTH[aiStrength].label.toLowerCase()} · {timePresetMs(aiTimePreset) / 60_000}{' '}
-            мин
+            Вы белые · колода «{activeDeck?.name ?? '—'}» · ИИ {aiStrength}/10 (
+            {aiSearchProfile(aiStrength).hint}) · {timePresetMs(aiTimePreset) / 60_000} мин
           </p>
 
           <div className={styles.lobbyActions}>
@@ -406,27 +412,54 @@ export function BattleView() {
               </div>
 
               <div className={styles.history} aria-label="История ходов">
-                <h3 className={styles.historyTitle}>История</h3>
-                {moveHistory.length === 0 ? (
+                <div className={styles.historyHead}>
+                  <h3 className={styles.historyTitle}>Ходы</h3>
+                </div>
+                {historyBlocks.length === 0 ? (
                   <p className={styles.historyEmpty}>Ходов пока нет</p>
                 ) : (
-                  <ol className={styles.historyList}>
-                    {moveHistory.map((entry) => (
-                      <li key={`${entry.ply}-${entry.text}`} className={styles.historyItem}>
-                        <span className={styles.historyMeta}>
-                          {entry.turn}
-                          {entry.player === 'white' ? 'б' : 'ч'}
-                        </span>
-                        <span
-                          className={
-                            entry.player === 'white' ? styles.historyWhite : styles.historyBlack
-                          }
-                        >
-                          {entry.text}
-                        </span>
-                      </li>
-                    ))}
-                  </ol>
+                  <div className={styles.historyScroll} ref={historyScrollRef}>
+                    <ol className={styles.historyList}>
+                      {historyBlocks.map((block) => {
+                        if (block.type === 'system') {
+                          return (
+                            <li
+                              key={`sys-${block.entry.ply}-${block.entry.text}`}
+                              className={styles.historySystem}
+                            >
+                              {block.entry.text}
+                            </li>
+                          );
+                        }
+                        const { row } = block;
+                        return (
+                          <li key={`t-${row.turn}`} className={styles.historyRow}>
+                            <span className={styles.historyIndex}>{row.turn}.</span>
+                            <span
+                              className={[
+                                styles.historyMove,
+                                row.white && row.white.ply === lastPly ? styles.historyActive : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            >
+                              {row.white?.text ?? ''}
+                            </span>
+                            <span
+                              className={[
+                                styles.historyMove,
+                                row.black && row.black.ply === lastPly ? styles.historyActive : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            >
+                              {row.black?.text ?? ''}
+                            </span>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
                 )}
               </div>
 

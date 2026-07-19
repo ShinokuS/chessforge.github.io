@@ -91,6 +91,17 @@
   border-radius: 2px;
 }
 
+.strengthSlider {
+  width: min(100%, 280px);
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.sliderHint {
+  font-size: 0.82rem;
+  color: color-mix(in srgb, var(--muted) 85%, var(--accent));
+}
+
 .lobbyHint {
   margin: 0;
   color: var(--muted);
@@ -311,58 +322,88 @@
 .history {
   flex: 1 1 0;
   min-height: 0;
-  background: color-mix(in srgb, var(--bg2) 88%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-dim) 55%, transparent);
-  padding: 0.55rem 0.65rem;
-  overflow-x: hidden;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg2) 92%, #fff 4%);
+  border: 1px solid color-mix(in srgb, var(--accent-dim) 45%, transparent);
+  overflow: hidden;
+}
+
+.historyHead {
+  flex: 0 0 auto;
+  padding: 0.4rem 0.55rem 0.35rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-dim) 35%, transparent);
+  background: color-mix(in srgb, var(--bg2) 96%, transparent);
 }
 
 .historyTitle {
-  margin: 0 0 0.45rem;
+  margin: 0;
   font-family: var(--font-display);
-  font-size: 0.92rem;
+  font-size: 0.88rem;
   font-weight: 600;
-  position: sticky;
-  top: 0;
-  background: color-mix(in srgb, var(--bg2) 96%, transparent);
-  z-index: 1;
 }
 
 .historyEmpty {
   margin: 0;
+  padding: 0.65rem 0.7rem;
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.historyScroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.2rem 0;
 }
 
 .historyList {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.28rem;
 }
 
-.historyItem {
+.historyRow {
   display: grid;
-  grid-template-columns: 2rem 1fr;
-  gap: 0.3rem;
-  font-size: 0.82rem;
-  line-height: 1.3;
-}
-
-.historyMeta {
-  color: var(--muted);
+  grid-template-columns: 2rem 1fr 1fr;
+  align-items: stretch;
+  gap: 0;
+  font-size: 0.8rem;
+  line-height: 1.35;
   font-variant-numeric: tabular-nums;
 }
 
-.historyWhite {
-  color: var(--ink);
+.historyRow:nth-child(even) {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
 }
 
-.historyBlack {
-  color: color-mix(in srgb, var(--ink) 72%, var(--muted));
+.historyIndex {
+  padding: 0.22rem 0.35rem;
+  color: var(--muted);
+  text-align: right;
+  user-select: none;
+}
+
+.historyMove {
+  padding: 0.22rem 0.4rem;
+  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.historyActive {
+  background: color-mix(in srgb, #7eb6e8 55%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #5a9fd4 40%, transparent);
+}
+
+.historySystem {
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-style: italic;
+  border-top: 1px dashed color-mix(in srgb, var(--accent-dim) 40%, transparent);
 }
 
 .hint {

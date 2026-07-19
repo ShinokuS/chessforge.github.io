@@ -15,9 +15,9 @@ import {
   type MatchClocks,
 } from '../battle/clock';
 import {
-  AI_STRENGTH,
+  clampAiStrength,
   timePresetMs,
-  type AiStrength,
+  type AiStrengthLevel,
   type SidePreference,
   type TimePresetId,
 } from '../battle/settings';
@@ -68,8 +68,8 @@ type AppStore = {
   battleMode: BattleMode;
   setBattleMode: (mode: BattleMode) => void;
   aiPlaying: boolean;
-  aiStrength: AiStrength;
-  setAiStrength: (v: AiStrength) => void;
+  aiStrength: AiStrengthLevel;
+  setAiStrength: (v: AiStrengthLevel) => void;
   aiTimePreset: TimePresetId;
   setAiTimePreset: (v: TimePresetId) => void;
   onlineTimePreset: TimePresetId;
@@ -114,11 +114,7 @@ const initialRoom =
     : '';
 
 function isPlyEntry(e: MoveHistoryEntry): boolean {
-  return (
-    e.text.startsWith('Рокировка') ||
-    e.text.includes('→') ||
-    (e.text.includes('удар') && !e.text.startsWith('Шипы'))
-  );
+  return e.kind === 'ply';
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
@@ -179,8 +175,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     setView: (view) => set({ view }),
     battleMode: initialRoom ? 'online' : 'ai',
     aiPlaying: false,
-    aiStrength: 'medium',
-    setAiStrength: (aiStrength) => set({ aiStrength }),
+    aiStrength: 6,
+    setAiStrength: (aiStrength) => set({ aiStrength: clampAiStrength(aiStrength) }),
     aiTimePreset: '10',
     setAiTimePreset: (aiTimePreset) => set({ aiTimePreset }),
     onlineTimePreset: '10',
@@ -310,7 +306,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         set({ lastError: 'Выберите полную сохранённую колоду' });
         return;
       }
-      s.setAiDepth(AI_STRENGTH[aiStrength].depth);
+      s.setAiStrength(aiStrength);
       s.restart(deck);
       const ms = timePresetMs(aiTimePreset);
       set({

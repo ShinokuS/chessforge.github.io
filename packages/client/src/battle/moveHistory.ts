@@ -6,7 +6,19 @@ export type MoveHistoryEntry = {
   turn: number;
   player: 'white' | 'black';
   text: string;
+  /** Real half-move vs annotation (spikes death, result…). */
+  kind: 'ply' | 'system';
 };
+
+export type HistoryTurnRow = {
+  turn: number;
+  white?: MoveHistoryEntry;
+  black?: MoveHistoryEntry;
+};
+
+export type HistoryDisplayBlock =
+  | { type: 'turn'; row: HistoryTurnRow }
+  | { type: 'system'; entry: MoveHistoryEntry };
 
 function sq(c: Coord): string {
   return `${String.fromCharCode(97 + c.x)}${c.y + 1}`;
@@ -32,6 +44,36 @@ function ownerOf(state: MatchState, pieceId: string, fallbackPly: number): 'whit
   return fallbackPly % 2 === 1 ? 'white' : 'black';
 }
 
+/** Pair plies into Lichess-style turn rows (N. white black). */
+export function groupHistoryForDisplay(entries: MoveHistoryEntry[]): HistoryDisplayBlock[] {
+  const blocks: HistoryDisplayBlock[] = [];
+  let current: HistoryTurnRow | null = null;
+
+  const flush = () => {
+    if (current) {
+      blocks.push({ type: 'turn', row: current });
+      current = null;
+    }
+  };
+
+  for (const e of entries) {
+    if (e.kind === 'system') {
+      flush();
+      blocks.push({ type: 'system', entry: e });
+      continue;
+    }
+
+    if (!current || current.turn !== e.turn) {
+      flush();
+      current = { turn: e.turn };
+    }
+    if (e.player === 'white') current.white = e;
+    else current.black = e;
+  }
+  flush();
+  return blocks;
+}
+
 /** Build chronological move lines from a batch of events after a command. */
 export function formatEventsToHistory(
   events: GameEvent[],
@@ -53,8 +95,19 @@ export function formatEventsToHistory(
       turn: Math.ceil(ply / 2),
       player,
       text: text + extra,
+      kind: 'ply',
     });
     ply += 1;
+  };
+
+  const pushSystem = (player: 'white' | 'black', text: string) => {
+    entries.push({
+      ply,
+      turn: Math.ceil(Math.max(1, ply) / 2),
+      player,
+      text,
+      kind: 'system',
+    });
   };
 
   for (const e of events) {
@@ -99,23 +152,15 @@ export function formatEventsToHistory(
       const last = entries[entries.length - 1];
       if (last) last.text += ` · пещера→${sq(e.to)}`;
     } else if (e.type === 'PieceDestroyed' && e.reason === 'spikes') {
-      entries.push({
-        ply,
-        turn: Math.ceil(ply / 2),
-        player: ply % 2 === 1 ? 'white' : 'black',
-        text: `Шипы: уничтожена фигура на ${sq(e.at)}`,
-      });
+      pushSystem(
+        ply % 2 === 1 ? 'white' : 'black',
+        `Шипы: уничтожена фигура на ${sq(e.at)}`,
+      );
     } else if (e.type === 'GameOver') {
-      entries.push({
-        ply,
-        turn: Math.ceil(Math.max(1, ply) / 2),
-        player: e.winner,
-        text: `Матч окончен — победа ${e.winner === 'white' ? 'белых' : 'чёрных'}`,
-      });
+      pushSystem(e.winner, `Матч окончен — победа ${e.winner === 'white' ? 'белых' : 'чёрных'}`);
     }
   }
 
-  // Non-lethal strike: Damaged without Moved
   if (pendingStrike) {
     const atk = pieceName(stateAfter, pendingStrike.byPieceId);
     const tgt = pieceName(stateAfter, pendingStrike.pieceId);

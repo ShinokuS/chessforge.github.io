@@ -1,4 +1,4 @@
-import { buildAiDeck, chooseCommand } from '@chessforge/ai';
+import { buildAiDeck, chooseCommandAsync, type ChooseOptions } from '@chessforge/ai';
 import {
   applyCommand,
   createDemoMatch,
@@ -10,6 +10,7 @@ import {
   type MatchState,
 } from '@chessforge/engine';
 import type { Deck } from '../repositories/types.js';
+import { aiChooseOptions, clampAiStrength, type AiStrengthLevel } from '../battle/settings.js';
 
 export type SessionMode = 'offline-ai' | 'hotseat';
 
@@ -20,21 +21,19 @@ export type GameSessionListener = (snapshot: {
 }) => void;
 
 export function createMatchFromDeck(playerDeck: Deck, seed = Date.now()): MatchState {
-  // Mix seed so AI deck and board seed both vary between matches
   const aiSeed = (seed ^ 0x9e3779b9) >>> 0;
   return createMatchFromPlacements(playerDeck.placements, buildAiDeck(aiSeed), seed);
 }
 
 /**
  * Owns MatchState. UI and AI both go through submitCommand.
- * Later: NetworkGameSession implements the same surface.
  */
 export class GameSession {
   private state: MatchState;
   private listeners = new Set<GameSessionListener>();
   private lastError: string | null = null;
   private aiBusy = false;
-  private aiDepth = 2;
+  private aiOptions: ChooseOptions = aiChooseOptions(6);
 
   constructor(
     private readonly mode: SessionMode = 'offline-ai',
@@ -47,8 +46,14 @@ export class GameSession {
     return this.state;
   }
 
+  /** @deprecated prefer setAiStrength(0–10) */
   setAiDepth(depth: number): void {
-    this.aiDepth = Math.max(1, Math.min(4, Math.floor(depth)));
+    const d = Math.max(1, Math.min(14, Math.floor(depth)));
+    this.setAiStrength(Math.round((d / 14) * 10));
+  }
+
+  setAiStrength(strength: AiStrengthLevel): void {
+    this.aiOptions = aiChooseOptions(clampAiStrength(strength));
   }
 
   getLegalMovesFrom(from: { x: number; y: number }) {
@@ -93,14 +98,15 @@ export class GameSession {
 
   private async runAi(): Promise<void> {
     this.aiBusy = true;
-    const depth = this.aiDepth;
-    await new Promise((r) => setTimeout(r, depth <= 1 ? 180 : 280));
+    const opts = { ...this.aiOptions };
+    await new Promise((r) => setTimeout(r, 80));
     if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') {
       this.aiBusy = false;
       return;
     }
-    const cmd = chooseCommand(this.state, { depth });
+    const cmd = await chooseCommandAsync(this.state, opts);
     this.aiBusy = false;
+    if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') return;
     this.submitCommand(cmd);
   }
 

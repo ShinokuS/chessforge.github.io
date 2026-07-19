@@ -9,23 +9,9 @@ import {
   type FormationPlacement,
   type FormationSlotId,
 } from '@chessforge/engine';
+import { estimateModStrength, isPremiumMod } from './heuristics.js';
 
-/** Soft preference weights — noise in buildAiDeck dominates variety. */
-const MOD_PRIORITY: Record<string, number> = {
-  chaplain: 100,
-  outrider: 95,
-  regent: 90,
-  ironclad: 85,
-  warden: 80,
-  sprinter: 75,
-  skirmisher: 70,
-  exchanger: 68,
-  spearman: 65,
-  lancer: 60,
-  cryomancer: 58,
-  sentry: 56,
-  anchor: 55,
-};
+const SCORE_NOISE = 22;
 
 function mulberry32(seed: number): () => number {
   let a = seed >>> 0;
@@ -38,9 +24,26 @@ function mulberry32(seed: number): () => number {
   };
 }
 
+type Candidate = {
+  slotId: FormationSlotId;
+  defId: string;
+  cost: number;
+  strength: number;
+  premium: boolean;
+  score: number;
+};
+
+function pickTargetSpend(rng: () => number): number {
+  const roll = rng();
+  if (roll < 0.5) return DECK_COST_CAP;
+  if (roll < 0.78) return DECK_COST_CAP - 1;
+  if (roll < 0.92) return DECK_COST_CAP - 2;
+  return 6 + Math.floor(rng() * 2);
+}
+
 /**
- * Build a full classic formation, spending up to a random budget ≤ DECK_COST_CAP.
- * Same seed → same deck; different seeds diverge strongly.
+ * Random classic formation biased toward feature-strong mods and high spend.
+ * Strength comes from def flags (freeze, HP, abilities…), not id tables.
  */
 export function buildAiDeck(seed = 1): FormationPlacement[] {
   const rng = mulberry32(seed >>> 0);
@@ -48,23 +51,19 @@ export function buildAiDeck(seed = 1): FormationPlacement[] {
     classicBasePlacements().map((p) => [p.slotId, p.defId]),
   );
 
-  // Spend somewhere from ~40% to 100% of the cap so decks are not always maxed.
-  // Anchor (-3) can push effective spend above raw cost sum; clamp budget checks by DECK_COST_CAP on final.
-  const budgetFloor = Math.max(2, Math.floor(DECK_COST_CAP * 0.4));
-  const budget = budgetFloor + Math.floor(rng() * (DECK_COST_CAP - budgetFloor + 1));
+  const targetSpend = pickTargetSpend(rng);
 
-  type Candidate = { slotId: FormationSlotId; defId: string; cost: number; score: number };
   const candidates: Candidate[] = [];
-
   for (const slot of FORMATION_SLOTS) {
-    const mods = listPieceDefinitionsByRole(slot.role).filter((d) => !d.isBase);
-    for (const mod of mods) {
-      const bias = (MOD_PRIORITY[mod.id] ?? 10) / Math.max(1, Math.abs(mod.cost) || 1);
+    for (const mod of listPieceDefinitionsByRole(slot.role).filter((d) => !d.isBase)) {
+      const strength = estimateModStrength(mod);
       candidates.push({
         slotId: slot.id,
         defId: mod.id,
         cost: mod.cost,
-        score: bias * 0.15 + rng() * 100,
+        strength,
+        premium: isPremiumMod(mod),
+        score: strength + rng() * SCORE_NOISE,
       });
     }
   }
@@ -74,28 +73,42 @@ export function buildAiDeck(seed = 1): FormationPlacement[] {
   let spent = 0;
   const usedSlots = new Set<FormationSlotId>();
 
-  const tryPlace = (c: Candidate, allowSkip: boolean): boolean => {
+  const place = (c: Candidate): boolean => {
     if (usedSlots.has(c.slotId)) return false;
     const next = spent + c.cost;
     if (next > DECK_COST_CAP) return false;
-    if (c.cost > 0 && next > budget && spent >= budgetFloor) return false;
-    if (allowSkip && rng() < 0.22) return false;
     map.set(c.slotId, c.defId);
     usedSlots.add(c.slotId);
     spent = next;
     return true;
   };
 
-  for (const c of candidates) {
-    tryPlace(c, true);
-    if (spent >= budget && spent >= budgetFloor) break;
+  if (rng() < 0.4) {
+    const engines = candidates
+      .filter((c) => c.cost < 0)
+      .sort((a, b) => a.cost - b.cost || b.score - a.score);
+    for (const eng of engines) {
+      if (place(eng)) break;
+    }
   }
 
-  if (spent < budget) {
-    for (const c of candidates) {
-      tryPlace(c, false);
-      if (spent >= budget) break;
-    }
+  for (const c of candidates) {
+    if (c.cost <= 0) continue;
+    if (usedSlots.has(c.slotId)) continue;
+    if (spent + c.cost > DECK_COST_CAP) continue;
+    if (spent + c.cost > targetSpend && !c.premium) continue;
+    if (rng() < 0.06 && !c.premium) continue;
+    place(c);
+  }
+
+  const fillers = candidates
+    .filter((c) => c.cost > 0 && !usedSlots.has(c.slotId))
+    .sort((a, b) => b.strength - a.strength || b.score - a.score);
+  for (const c of fillers) {
+    if (spent >= targetSpend && spent >= DECK_COST_CAP - 1) break;
+    if (spent + c.cost > DECK_COST_CAP) continue;
+    if (spent + c.cost > targetSpend && spent >= targetSpend) continue;
+    place(c);
   }
 
   const placements: FormationPlacement[] = [...map.entries()].map(([slotId, defId]) => ({
