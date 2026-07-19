@@ -34,6 +34,7 @@ export class GameSession {
   private listeners = new Set<GameSessionListener>();
   private lastError: string | null = null;
   private aiBusy = false;
+  private aiDepth = 2;
 
   constructor(
     private readonly mode: SessionMode = 'offline-ai',
@@ -44,6 +45,10 @@ export class GameSession {
 
   getState(): MatchState {
     return this.state;
+  }
+
+  setAiDepth(depth: number): void {
+    this.aiDepth = Math.max(1, Math.min(4, Math.floor(depth)));
   }
 
   getLegalMovesFrom(from: { x: number; y: number }) {
@@ -88,12 +93,13 @@ export class GameSession {
 
   private async runAi(): Promise<void> {
     this.aiBusy = true;
-    await new Promise((r) => setTimeout(r, 280));
+    const depth = this.aiDepth;
+    await new Promise((r) => setTimeout(r, depth <= 1 ? 180 : 280));
     if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') {
       this.aiBusy = false;
       return;
     }
-    const cmd = chooseCommand(this.state);
+    const cmd = chooseCommand(this.state, { depth });
     this.aiBusy = false;
     this.submitCommand(cmd);
   }
@@ -105,6 +111,14 @@ export class GameSession {
     if (this.mode === 'offline-ai' && this.state.activePlayer === 'black') {
       void this.runAi();
     }
+  }
+
+  /** End the match when a side runs out of clock time. */
+  endByTimeout(winner: 'white' | 'black'): void {
+    if (this.state.phase !== 'play') return;
+    this.state = { ...this.state, phase: 'gameOver', winner };
+    this.lastError = null;
+    this.emit([]);
   }
 }
 

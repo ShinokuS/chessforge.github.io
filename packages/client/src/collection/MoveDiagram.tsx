@@ -102,7 +102,7 @@ export function MoveDiagram({ def }: MoveDiagramProps) {
     for (let x = 0; x < SIZE; x++) {
       const kind = cells.get(key(x, y)) ?? 'empty';
       const isOrigin = x === origin.x && y === origin.y;
-      const isDark = (x + y) % 2 === 1;
+      const isDark = (x + y) % 2 === 0;
       rows.push(
         <div
           key={key(x, y)}

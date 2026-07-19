@@ -1,20 +1,13 @@
 .wrap {
-  display: grid;
-  grid-template-columns: minmax(0, var(--board-size, 560px)) minmax(180px, 240px);
-  gap: 1.25rem;
-  align-items: start;
-}
-
-@media (max-width: 720px) {
-  .wrap {
-    grid-template-columns: 1fr;
-  }
+  display: contents;
 }
 
 .board {
+  grid-area: board;
   --board-size: min(100%, 560px);
   display: grid;
   width: var(--board-size);
+  max-width: 100%;
   height: auto;
   aspect-ratio: 1 / 1;
   border: 3px solid var(--accent-dim);
@@ -200,10 +193,15 @@
 }
 
 .inspect {
-  padding: 0.85rem 1rem;
+  grid-area: inspect;
+  padding: 0.75rem 0.9rem;
   background: color-mix(in srgb, var(--bg2) 85%, transparent);
-  border-left: 3px solid var(--accent-dim);
-  min-height: 7rem;
+  border-right: 3px solid var(--accent-dim);
+  border-left: none;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  box-sizing: border-box;
 }
 
 .inspect h3 {

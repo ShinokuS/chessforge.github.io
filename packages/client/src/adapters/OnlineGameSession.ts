@@ -17,6 +17,8 @@ import {
   type PeerMessage,
 } from '../online/protocol';
 import { validatePlacements } from '../online/validate';
+import { resolveSide, type SidePreference } from '../battle/settings';
+import { INITIAL_CLOCK_MS } from '../battle/clock';
 
 export type OnlineStatus =
   | 'idle'
@@ -25,6 +27,11 @@ export type OnlineStatus =
   | 'playing'
   | 'disconnected'
   | 'error';
+
+export type CreateRoomOptions = {
+  clockMs: number;
+  side: SidePreference;
+};
 
 type PeerCtor = new (...args: any[]) => PeerInstance;
 
@@ -60,7 +67,7 @@ async function loadPeer(): Promise<PeerCtor> {
 
 /**
  * P2P online session via PeerJS.
- * Host (white) is authoritative. Each side brings its own deck placements.
+ * Host is authoritative regardless of board color. Each side brings its own deck.
  */
 export class OnlineGameSession {
   private state: MatchState = createDemoMatch();
@@ -70,6 +77,10 @@ export class OnlineGameSession {
   private roomId: string | null = null;
   private myColor: PlayerId | null = null;
   private statusListeners = new Set<() => void>();
+  private matchClockMs = INITIAL_CLOCK_MS;
+  private hostSide: SidePreference = 'white';
+  /** Color assigned to host at room creation (including resolved random). */
+  private hostColor: PlayerId = 'white';
 
   private peer: PeerInstance | null = null;
   private conn: DataConn | null = null;
@@ -90,6 +101,14 @@ export class OnlineGameSession {
 
   getMyColor(): PlayerId | null {
     return this.myColor;
+  }
+
+  getMatchClockMs(): number {
+    return this.matchClockMs;
+  }
+
+  getHostSidePreference(): SidePreference {
+    return this.hostSide;
   }
 
   getLegalMovesFrom(from: { x: number; y: number }) {
@@ -142,6 +161,10 @@ export class OnlineGameSession {
     this.conn.send(msg);
   }
 
+  private guestColor(): PlayerId {
+    return this.myColor === 'white' ? 'black' : 'white';
+  }
+
   private bindConnection(conn: DataConn): void {
     this.conn = conn;
     conn.on('data', (raw: unknown) => {
@@ -173,17 +196,27 @@ export class OnlineGameSession {
         return;
       }
       if (!this.hostPlacements || !this.roomId) return;
+
       const seed = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
-      this.state = createMatchFromPlacements(this.hostPlacements, msg.placements, seed);
-      this.myColor = 'white';
+      const hostColor = this.hostColor;
+      const guestColor: PlayerId = hostColor === 'white' ? 'black' : 'white';
+      const white =
+        hostColor === 'white' ? this.hostPlacements : msg.placements;
+      const black =
+        hostColor === 'white' ? msg.placements : this.hostPlacements;
+
+      this.state = createMatchFromPlacements(white, black, seed);
+      this.myColor = hostColor;
       this.lastError = null;
       this.setStatus('playing');
       this.send({
         type: 'matchStart',
         roomId: this.roomId,
         seed,
-        white: this.hostPlacements,
-        black: msg.placements,
+        white,
+        black,
+        clockMs: this.matchClockMs,
+        yourColor: guestColor,
       });
       this.emit([]);
       return;
@@ -191,7 +224,8 @@ export class OnlineGameSession {
 
     if (msg.type === 'matchStart' && !this.isHost) {
       this.roomId = msg.roomId;
-      this.myColor = 'black';
+      this.myColor = msg.yourColor;
+      this.matchClockMs = msg.clockMs > 0 ? msg.clockMs : INITIAL_CLOCK_MS;
       this.state = createMatchFromPlacements(msg.white, msg.black, msg.seed);
       this.lastError = null;
       this.setStatus('playing');
@@ -200,7 +234,9 @@ export class OnlineGameSession {
     }
 
     if (msg.type === 'commandRequest' && this.isHost) {
-      if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') {
+      if (this.status !== 'playing' || !this.myColor) return;
+      const guest = this.guestColor();
+      if (this.state.phase !== 'play' || this.state.activePlayer !== guest) {
         this.send({ type: 'error', message: 'Сейчас не ваш ход' });
         return;
       }
@@ -211,14 +247,13 @@ export class OnlineGameSession {
       }
       this.state = result.state;
       this.lastError = null;
-      this.send({ type: 'command', command: msg.command, by: 'black' });
+      this.send({ type: 'command', command: msg.command, by: guest });
       this.emit(result.events);
       return;
     }
 
     if (msg.type === 'command') {
-      if (this.isHost && msg.by === 'white') return;
-      if (this.isHost && msg.by === 'black') return;
+      if (this.isHost) return;
       const result = applyCommand(this.state, msg.command);
       if (!result.ok) {
         this.lastError = result.message;
@@ -253,7 +288,10 @@ export class OnlineGameSession {
     this.peer = null;
   }
 
-  async createRoom(placements: FormationPlacement[]): Promise<void> {
+  async createRoom(
+    placements: FormationPlacement[],
+    options: CreateRoomOptions,
+  ): Promise<void> {
     const err = validatePlacements(placements);
     if (err) {
       this.fail(err);
@@ -263,7 +301,10 @@ export class OnlineGameSession {
     this.disconnect();
     this.isHost = true;
     this.hostPlacements = placements;
-    this.myColor = 'white';
+    this.hostSide = options.side;
+    this.hostColor = resolveSide(options.side);
+    this.matchClockMs = options.clockMs > 0 ? options.clockMs : INITIAL_CLOCK_MS;
+    this.myColor = this.hostColor;
     this.setStatus('connecting');
 
     let Peer: PeerCtor;
@@ -287,9 +328,13 @@ export class OnlineGameSession {
         });
 
         this.roomId = roomId;
+        const previewWhite =
+          this.hostColor === 'black' ? classicBasePlacements() : placements;
+        const previewBlack =
+          this.hostColor === 'black' ? placements : classicBasePlacements();
         this.state = createMatchFromPlacements(
-          placements,
-          classicBasePlacements(),
+          previewWhite,
+          previewBlack,
           (Date.now() >>> 0) || 1,
         );
         this.setStatus('waiting');
@@ -346,7 +391,7 @@ export class OnlineGameSession {
     this.disconnect();
     this.isHost = false;
     this.hostPlacements = null;
-    this.myColor = 'black';
+    this.myColor = null;
     this.roomId = code;
     this.setStatus('connecting');
 
@@ -417,13 +462,21 @@ export class OnlineGameSession {
       }
       this.state = result.state;
       this.lastError = null;
-      this.send({ type: 'command', command, by: 'white' });
+      this.send({ type: 'command', command, by: this.myColor });
       this.emit(result.events);
       return true;
     }
 
     this.send({ type: 'commandRequest', command });
     return true;
+  }
+
+  /** Local clock timeout — ends the match on this client. */
+  endByTimeout(winner: PlayerId): void {
+    if (this.status !== 'playing' || this.state.phase !== 'play') return;
+    this.state = { ...this.state, phase: 'gameOver', winner };
+    this.lastError = null;
+    this.emit([]);
   }
 
   disconnect(): void {
@@ -439,6 +492,9 @@ export class OnlineGameSession {
     this.myColor = null;
     this.hostPlacements = null;
     this.isHost = false;
+    this.hostSide = 'white';
+    this.hostColor = 'white';
+    this.matchClockMs = INITIAL_CLOCK_MS;
     this.state = createDemoMatch();
     this.lastError = null;
     this.setStatus('idle');

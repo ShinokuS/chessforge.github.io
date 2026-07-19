@@ -8,6 +8,19 @@ import {
   formatEventsToHistory,
   type MoveHistoryEntry,
 } from '../battle/moveHistory';
+import {
+  advanceClocks,
+  freshClocks,
+  switchClock,
+  type MatchClocks,
+} from '../battle/clock';
+import {
+  AI_STRENGTH,
+  timePresetMs,
+  type AiStrength,
+  type SidePreference,
+  type TimePresetId,
+} from '../battle/settings';
 
 export type AppView = 'battle' | 'collection' | 'deck' | 'library';
 export type BattleMode = 'ai' | 'online';
@@ -15,6 +28,11 @@ export type BattleMode = 'ai' | 'online';
 export type LastMoveHighlight = {
   from: Coord;
   to: Coord;
+};
+
+export type EndBanner = {
+  kind: 'victory' | 'timeout';
+  winner: PlayerId;
 };
 
 function lastMoveFromEvents(events: GameEvent[]): LastMoveHighlight | null {
@@ -43,12 +61,23 @@ type AppStore = {
   setView: (view: AppView) => void;
   battleMode: BattleMode;
   setBattleMode: (mode: BattleMode) => void;
+  aiPlaying: boolean;
+  aiStrength: AiStrength;
+  setAiStrength: (v: AiStrength) => void;
+  aiTimePreset: TimePresetId;
+  setAiTimePreset: (v: TimePresetId) => void;
+  onlineTimePreset: TimePresetId;
+  setOnlineTimePreset: (v: TimePresetId) => void;
+  onlineSide: SidePreference;
+  setOnlineSide: (v: SidePreference) => void;
   session: GameSession;
   online: OnlineGameSession;
   state: MatchState;
   events: GameEvent[];
   moveHistory: MoveHistoryEntry[];
   lastMove: LastMoveHighlight | null;
+  clocks: MatchClocks;
+  endBanner: EndBanner | null;
   lastError: string | null;
   selected: Coord | null;
   setSelected: (c: Coord | null) => void;
@@ -59,10 +88,14 @@ type AppStore = {
   cards: ReturnType<LocalCollectionRepository['listCards']>;
   decks: Deck[];
   submitMove: (to: Coord) => void;
+  startAiMatch: () => void;
   restart: () => void;
   saveDeck: (deck: Deck, opts?: { startBattle?: boolean; makeActive?: boolean }) => void;
   deleteDeck: (id: string) => void;
   canControl: (owner: PlayerId) => boolean;
+  resetClocks: (active: PlayerId | null, initialMs?: number) => void;
+  tickClock: () => void;
+  dismissEndBanner: () => void;
 };
 
 const repo = new LocalCollectionRepository();
@@ -94,20 +127,38 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ state, events, lastError });
       return;
     }
-    const { moveHistory } = get();
+    const { moveHistory, clocks } = get();
     const realPlyCount = moveHistory.filter(isPlyEntry).length;
     const appended = formatEventsToHistory(events, state, realPlyCount + 1);
     const move = lastMoveFromEvents(events);
+
+    let nextClocks = clocks;
+    let endBanner = get().endBanner;
+    for (const e of events) {
+      if (e.type === 'TurnEnded') {
+        nextClocks = switchClock(nextClocks, e.next);
+      }
+      if (e.type === 'GameOver') {
+        nextClocks = {
+          ...advanceClocks(nextClocks).clocks,
+          active: null,
+          lastTickAt: null,
+        };
+        endBanner = { kind: 'victory', winner: e.winner };
+      }
+    }
+
     set({
       state,
       events,
       lastError,
+      clocks: nextClocks,
+      endBanner,
       moveHistory: appended.length ? [...moveHistory, ...appended] : moveHistory,
       ...(move ? { lastMove: move } : {}),
     });
   };
 
-  // Subscribe after store exists (avoid get() during initializer)
   queueMicrotask(() => {
     session.subscribe(({ state, events, lastError }) => {
       appendEvents('ai', state, events, lastError);
@@ -121,28 +172,41 @@ export const useAppStore = create<AppStore>((set, get) => {
     view: 'battle',
     setView: (view) => set({ view }),
     battleMode: initialRoom ? 'online' : 'ai',
+    aiPlaying: false,
+    aiStrength: 'medium',
+    setAiStrength: (aiStrength) => set({ aiStrength }),
+    aiTimePreset: '10',
+    setAiTimePreset: (aiTimePreset) => set({ aiTimePreset }),
+    onlineTimePreset: '10',
+    setOnlineTimePreset: (onlineTimePreset) => set({ onlineTimePreset }),
+    onlineSide: 'white',
+    setOnlineSide: (onlineSide) => set({ onlineSide }),
     setBattleMode: (battleMode) => {
-      const { repo: r, activeDeckId, session: s, online: o } = get();
+      const { online: o } = get();
       if (battleMode === 'ai') {
         o.disconnect();
-        const deck = r.getDeck(activeDeckId) ?? undefined;
-        s.restart(deck ?? undefined);
         set({
           battleMode,
+          aiPlaying: false,
           selected: null,
           moveHistory: [],
           lastMove: null,
           lastError: null,
-          state: s.getState(),
+          endBanner: null,
+          clocks: freshClocks(null),
+          state: session.getState(),
         });
         return;
       }
       set({
         battleMode,
+        aiPlaying: false,
         selected: null,
         moveHistory: [],
         lastMove: null,
         lastError: null,
+        endBanner: null,
+        clocks: freshClocks(null),
         state: o.getState(),
       });
     },
@@ -152,6 +216,8 @@ export const useAppStore = create<AppStore>((set, get) => {
     events: [],
     moveHistory: [],
     lastMove: null,
+    clocks: freshClocks(null),
+    endBanner: null,
     lastError: null,
     selected: null,
     setSelected: (selected) => set({ selected }),
@@ -166,12 +232,46 @@ export const useAppStore = create<AppStore>((set, get) => {
         decks: repo.listDecks(),
       }),
     canControl: (owner) => {
-      const { battleMode, online: o } = get();
-      if (battleMode === 'ai') return owner === 'white';
+      const { battleMode, online: o, endBanner, state, aiPlaying } = get();
+      if (endBanner || state.phase === 'gameOver') return false;
+      if (battleMode === 'ai') return aiPlaying && owner === 'white';
       return o.getMyColor() === owner;
     },
+    resetClocks: (active, initialMs) => {
+      const { battleMode, aiTimePreset, onlineTimePreset } = get();
+      const ms =
+        initialMs ??
+        timePresetMs(battleMode === 'ai' ? aiTimePreset : onlineTimePreset);
+      set({ clocks: freshClocks(active, ms), endBanner: null });
+    },
+    tickClock: () => {
+      const { clocks, endBanner, state, battleMode, online: o, session: s, aiPlaying } =
+        get();
+      if (endBanner || state.phase === 'gameOver') return;
+      const shouldRun =
+        battleMode === 'ai'
+          ? aiPlaying && state.phase === 'play'
+          : o.getStatus() === 'playing' && state.phase === 'play';
+      if (!shouldRun || !clocks.active) return;
+      const { clocks: next, timeoutWinner } = advanceClocks(clocks);
+      if (timeoutWinner) {
+        set({
+          clocks: next,
+          endBanner: { kind: 'timeout', winner: timeoutWinner },
+          selected: null,
+        });
+        if (battleMode === 'ai') s.endByTimeout(timeoutWinner);
+        else o.endByTimeout(timeoutWinner);
+        return;
+      }
+      set({ clocks: next });
+    },
+    dismissEndBanner: () => set({ endBanner: null }),
     submitMove: (to) => {
-      const { selected, battleMode, session: s, online: o, canControl, state } = get();
+      const { selected, battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying } =
+        get();
+      if (endBanner || state.phase === 'gameOver') return;
+      if (battleMode === 'ai' && !aiPlaying) return;
       if (!selected) return;
       const piece = state.pieces.find(
         (p) => p.pos.x === selected.x && p.pos.y === selected.y,
@@ -190,8 +290,31 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
       set({ selected: null });
     },
+    startAiMatch: () => {
+      const { repo: r, activeDeckId, session: s, aiStrength, aiTimePreset } = get();
+      const deck = r.getDeck(activeDeckId);
+      if (!deck || deck.placements.length < 16) {
+        set({ lastError: 'Выберите полную сохранённую колоду' });
+        return;
+      }
+      s.setAiDepth(AI_STRENGTH[aiStrength].depth);
+      s.restart(deck);
+      const ms = timePresetMs(aiTimePreset);
+      set({
+        aiPlaying: true,
+        selected: null,
+        moveHistory: [],
+        lastMove: null,
+        lastError: null,
+        endBanner: null,
+        clocks: freshClocks('white', ms),
+        state: s.getState(),
+        view: 'battle',
+        battleMode: 'ai',
+      });
+    },
     restart: () => {
-      const { repo: r, activeDeckId, session: s, battleMode, online: o } = get();
+      const { battleMode, online: o } = get();
       if (battleMode === 'online') {
         o.disconnect();
         set({
@@ -199,13 +322,22 @@ export const useAppStore = create<AppStore>((set, get) => {
           moveHistory: [],
           lastMove: null,
           lastError: null,
+          endBanner: null,
+          clocks: freshClocks(null),
           state: o.getState(),
         });
         return;
       }
-      const deck = r.getDeck(activeDeckId) ?? undefined;
-      s.restart(deck ?? undefined);
-      set({ selected: null, moveHistory: [], lastMove: null, state: s.getState() });
+      set({
+        aiPlaying: false,
+        selected: null,
+        moveHistory: [],
+        lastMove: null,
+        lastError: null,
+        endBanner: null,
+        clocks: freshClocks(null),
+        state: session.getState(),
+      });
     },
     saveDeck: (deck, opts) => {
       repo.saveDeck(deck);
@@ -217,14 +349,11 @@ export const useAppStore = create<AppStore>((set, get) => {
       };
       if (makeActive) patch.activeDeckId = deck.id;
       if (startBattle) {
-        const { session: s, battleMode } = get();
-        if (battleMode === 'ai') {
-          s.restart(deck);
-          patch.moveHistory = [];
-          patch.lastMove = null;
-          patch.state = s.getState();
-        }
         patch.view = 'battle';
+        patch.battleMode = 'ai';
+        patch.aiPlaying = false;
+        patch.endBanner = null;
+        patch.clocks = freshClocks(null);
       }
       set(patch);
     },

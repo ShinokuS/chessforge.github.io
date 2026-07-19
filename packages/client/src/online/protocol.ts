@@ -1,6 +1,6 @@
 import type { FormationPlacement, GameCommand, PlayerId } from '@chessforge/engine';
 
-/** Messages over PeerJS data connection (host = white is authoritative). */
+/** Messages over PeerJS data connection (host is authoritative regardless of color). */
 export type PeerMessage =
   | { type: 'guestHello'; placements: FormationPlacement[] }
   | {
@@ -9,6 +9,8 @@ export type PeerMessage =
       seed: number;
       white: FormationPlacement[];
       black: FormationPlacement[];
+      clockMs: number;
+      yourColor: PlayerId;
     }
   | { type: 'command'; command: GameCommand; by: PlayerId }
   | { type: 'commandRequest'; command: GameCommand }

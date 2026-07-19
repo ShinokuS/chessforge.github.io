@@ -33,15 +33,19 @@ export function BoardView() {
   const online = useAppStore((s) => s.online);
   const battleMode = useAppStore((s) => s.battleMode);
   const canControl = useAppStore((s) => s.canControl);
+  const endBanner = useAppStore((s) => s.endBanner);
   const [hovered, setHovered] = useState<Coord | null>(null);
 
   const activeSession = battleMode === 'online' ? online : session;
   const myColor = battleMode === 'online' ? online.getMyColor() : 'white';
-  const legal = selected ? activeSession.getLegalMovesFrom(selected) : [];
+  const legal = selected && !endBanner ? activeSession.getLegalMovesFrom(selected) : [];
   const legalMap = new Map(legal.map((m) => [`${m.to.x},${m.to.y}`, m]));
 
+  const aiPlaying = useAppStore((s) => s.aiPlaying);
+
   const onCellClick = (pos: Coord) => {
-    if (state.phase !== 'play') return;
+    if (endBanner || state.phase !== 'play') return;
+    if (battleMode === 'ai' && !aiPlaying) return;
     if (battleMode === 'online' && online.getStatus() !== 'playing') return;
     if (!myColor || state.activePlayer !== myColor) return;
 
@@ -75,7 +79,7 @@ export function BoardView() {
       const pos = { x, y };
       const tileId = getTileId(state.board, pos) ?? 'plain';
       const piece = state.pieces.find((p) => p.pos.x === x && p.pos.y === y);
-      const isDark = (x + y) % 2 === 1;
+      const isDark = (x + y) % 2 === 0;
       const isSelected = selected?.x === x && selected?.y === y;
       const isLastFrom = lastMove?.from.x === x && lastMove?.from.y === y;
       const isLastTo = lastMove?.to.x === x && lastMove?.to.y === y;

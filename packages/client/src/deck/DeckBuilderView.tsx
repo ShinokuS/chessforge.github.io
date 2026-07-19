@@ -198,7 +198,7 @@ export function DeckBuilderView() {
               {pawnRank.map((slot) => {
                 const defId = slotMap.get(slot.id);
                 const isActive = selectedSlot?.id === slot.id;
-                const isDark = slot.file % 2 === 0;
+                const isDark = slot.file % 2 === 1;
                 return (
                   <button
                     key={slot.id}
@@ -228,7 +228,7 @@ export function DeckBuilderView() {
               {backRank.map((slot) => {
                 const defId = slotMap.get(slot.id);
                 const isActive = selectedSlot?.id === slot.id;
-                const isDark = slot.file % 2 === 1;
+                const isDark = slot.file % 2 === 0;
                 return (
                   <button
                     key={slot.id}
