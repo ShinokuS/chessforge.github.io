@@ -72,6 +72,11 @@ export function BoardView() {
     if (battleMode === 'online' && online.getStatus() !== 'playing') return;
     if (!myColor || state.activePlayer !== myColor) return;
 
+    if (selected && selected.x === pos.x && selected.y === pos.y) {
+      setSelected(null);
+      return;
+    }
+
     const move = legalMap.get(`${pos.x},${pos.y}`);
     if (selected && move) {
       submitMove(pos);
