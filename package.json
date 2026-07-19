@@ -1,0 +1,14 @@
+{
+  "name": "chessforge",
+  "private": true,
+  "packageManager": "pnpm@11.15.0",
+  "scripts": {
+    "dev": "pnpm --filter @chessforge/engine build && pnpm --filter @chessforge/ai build && pnpm --filter @chessforge/client dev",
+    "build": "pnpm --filter @chessforge/engine build && pnpm --filter @chessforge/ai build && pnpm --filter @chessforge/client build",
+    "test": "pnpm --filter @chessforge/engine test",
+    "typecheck": "pnpm --filter @chessforge/engine build && pnpm --filter @chessforge/ai build && pnpm --filter @chessforge/client typecheck"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

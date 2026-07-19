@@ -1,0 +1,94 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+}
+
+.head p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  max-width: 40rem;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.card {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 0.85rem;
+  padding: 0.85rem;
+  background: color-mix(in srgb, var(--bg2) 80%, transparent);
+  border-left: 3px solid var(--accent-dim);
+}
+
+.card h3 {
+  margin: 0 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+}
+
+.card p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.meta {
+  margin-top: 0.45rem !important;
+  font-size: 0.8rem !important;
+  color: var(--accent) !important;
+}
+
+.swatch {
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--accent-dim);
+  box-sizing: border-box;
+}
+
+.swatchPlain {
+  background: var(--light-sq);
+}
+
+.swatchMud {
+  background: var(--dark-sq);
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    rgba(40, 30, 12, 0.25) 5px,
+    rgba(40, 30, 12, 0.25) 10px
+  );
+}
+
+.swatchSpikes {
+  background: var(--light-sq);
+  box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--danger) 70%, transparent);
+}
+
+.swatchMountain {
+  background: linear-gradient(160deg, #8a9a78, #5a6b45);
+}
+
+.swatchCave {
+  background: var(--dark-sq);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, #1a1410 55%, transparent);
+}
+
+.swatchLake {
+  background: color-mix(in srgb, #4a6570 55%, var(--dark-sq));
+}

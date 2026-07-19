@@ -1,0 +1,126 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+  width: 168px;
+}
+
+.grid {
+  display: grid;
+  box-sizing: content-box;
+  width: 168px;
+  height: 168px;
+  grid-template-columns: repeat(7, 24px);
+  grid-template-rows: repeat(7, 24px);
+  gap: 0;
+  border: 2px solid var(--accent-dim);
+  background: var(--dark-sq);
+  overflow: hidden;
+  line-height: 0;
+  font-size: 0;
+}
+
+.cell {
+  position: relative;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+}
+
+.light {
+  background-color: var(--light-sq);
+}
+
+.dark {
+  background-color: var(--dark-sq);
+}
+
+.quiet::before,
+.capture::before,
+.both::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.quiet::before {
+  background: color-mix(in srgb, var(--accent) 32%, transparent);
+}
+
+.capture::before,
+.both::before {
+  background: color-mix(in srgb, var(--danger) 36%, transparent);
+}
+
+.origin {
+  z-index: 1;
+}
+
+.piece {
+  position: relative;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+}
+
+.dot,
+.ring {
+  position: relative;
+  z-index: 1;
+  flex-shrink: 0;
+}
+
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--bg0) 55%, var(--accent));
+}
+
+.ring {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--danger) 85%, #fff);
+  box-sizing: border-box;
+}
+
+.legend {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.75rem;
+  line-height: 1.2;
+  color: var(--muted);
+}
+
+.legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.legendQuiet,
+.legendCapture {
+  display: inline-block;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+}
+
+.legendQuiet {
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+.legendCapture {
+  border: 2px solid color-mix(in srgb, var(--danger) 85%, #fff);
+  box-sizing: border-box;
+  background: transparent;
+}

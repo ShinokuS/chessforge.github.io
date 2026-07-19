@@ -1,0 +1,116 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 1.65rem;
+}
+
+.head p {
+  margin: 0.35rem 0 0.75rem;
+  color: var(--muted);
+  max-width: 40rem;
+}
+
+.head button {
+  background: transparent;
+  border: 1px solid var(--accent-dim);
+  color: var(--ink);
+  padding: 0.4rem 0.8rem;
+  border-radius: 2px;
+}
+
+.groupTitle {
+  margin: 0 0 0.55rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  color: var(--accent);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.65rem;
+  align-items: start;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--bg2) 80%, transparent);
+  border: 1px solid transparent;
+  border-left: 3px solid var(--accent-dim);
+  border-radius: 0 2px 2px 0;
+}
+
+.itemOpen {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  border-left-color: var(--accent);
+}
+
+.itemHeader {
+  width: 100%;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  text-align: left;
+  padding: 0.75rem 0.9rem;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.glyph {
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  display: block;
+}
+
+.body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+
+.mod {
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 0.15rem;
+}
+
+.desc {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.92rem;
+  line-height: 1.4;
+}
+
+.details {
+  padding: 0 0.9rem 0.85rem 3.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}

@@ -1,0 +1,50 @@
+:root {
+  --bg0: #1a2218;
+  --bg1: #24301f;
+  --bg2: #2f3d28;
+  --ink: #e8edd8;
+  --muted: #a3b090;
+  --accent: #c4a35a;
+  --accent-dim: #8a7340;
+  --danger: #c45c4a;
+  --ok: #6a9a5b;
+  --light-sq: #c5d0a8;
+  --dark-sq: #5a6b45;
+  --hl-move: rgba(196, 163, 90, 0.55);
+  --hl-capture: rgba(196, 92, 74, 0.65);
+  --hl-select: rgba(232, 237, 216, 0.35);
+  --font-display: 'Cormorant Garamond', Georgia, serif;
+  --font-body: 'Source Sans 3', system-ui, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-body);
+  color: var(--ink);
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, #3a4a30 0%, transparent 55%),
+    radial-gradient(ellipse 60% 40% at 90% 100%, #2a3824 0%, transparent 50%),
+    linear-gradient(160deg, var(--bg0), var(--bg1) 45%, #152018);
+  min-height: 100vh;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+a {
+  color: inherit;
+}
