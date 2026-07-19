@@ -8,6 +8,7 @@ export {
   isPassable,
   findCavePartner,
 } from './board/board.js';
+export { generateSymmetricBattlefield } from './board/generate.js';
 
 export type {
   BoardSpec,

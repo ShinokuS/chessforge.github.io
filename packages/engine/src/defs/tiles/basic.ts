@@ -1,4 +1,5 @@
-import type { PieceRole, TileDefinition } from '../../match/types.js';
+import type { TileDefinition } from '../../match/types.js';
+import type { PieceRole } from '../../match/types.js';
 
 export const plainTile: TileDefinition = {
   id: 'plain',
@@ -41,7 +42,7 @@ export const caveTile: TileDefinition = {
   id: 'cave',
   name: 'Пещера',
   description:
-    'Парный портал: вступив на одну пещеру, фигура мгновенно перемещается на другую свободную пещеру той же пары.',
+    'Парный портал: стоя на пещере, можно сходить на другую свободную пещеру той же пары (вместо обычного хода). Телепорт не срабатывает сам при входе.',
   passable: true,
   caveGroup: 'default',
 };
@@ -53,6 +54,33 @@ export const lakeTile: TileDefinition = {
   passable: false,
 };
 
+export const windTile: TileDefinition = {
+  id: 'wind',
+  name: 'Ветер',
+  description:
+    'Встав на клетку, фигура ждёт ход противника: после него её сносит на 1 клетку назад (от направления стороны), если целевая клетка свободна и проходима.',
+  passable: true,
+  windPush: true,
+};
+
+export const forestTile: TileDefinition = {
+  id: 'forest',
+  name: 'Лес',
+  description:
+    'Укрытие: фигура, вступившая на лес, неуязвима один свой ход (её нельзя ударить, съесть или заморозить, пока щит активен).',
+  passable: true,
+  forestShield: true,
+};
+
+export const mushroomTile: TileDefinition = {
+  id: 'mushroom',
+  name: 'Гриб',
+  description:
+    'Усиление: фигура, вступившая на гриб, получает +1 HP. После этого клетка становится равниной.',
+  passable: true,
+  mushroomHeal: true,
+};
+
 export const TILE_DEFS = [
   plainTile,
   mudTile,
@@ -60,4 +88,19 @@ export const TILE_DEFS = [
   mountainTile,
   caveTile,
   lakeTile,
+  windTile,
+  forestTile,
+  mushroomTile,
+] as const;
+
+/** Terrain pool for random symmetric battlefield generation. */
+export const GENERATABLE_TILE_IDS = [
+  'mud',
+  'spikes',
+  'mountain',
+  'cave',
+  'lake',
+  'wind',
+  'forest',
+  'mushroom',
 ] as const;

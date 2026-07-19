@@ -4,6 +4,7 @@ import {
   createMatch,
   createPieceInstance,
   createRectBoard,
+  generateSymmetricBattlefield,
   getBuffedPieceIds,
   getLegalMoves,
   getPieceDefinition,
@@ -84,7 +85,7 @@ describe('tiles', () => {
     expect(moves.some((m) => m.to.x === 0 && m.to.y === 3)).toBe(false);
   });
 
-  it('cave teleports to partner', () => {
+  it('cave allows move to partner on a later turn, not on enter', () => {
     const state = blankMatch(
       [
         createPieceInstance('rook', 'white', { x: 0, y: 0 }, 'r1'),
@@ -96,16 +97,36 @@ describe('tiles', () => {
         { pos: { x: 7, y: 5 }, tileId: 'cave' },
       ],
     );
-    const result = applyCommand(state, {
+    const enter = applyCommand(state, {
       type: 'move',
       from: { x: 0, y: 0 },
       to: { x: 0, y: 2 },
     });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    const rook = result.state.pieces.find((p) => p.id === 'r1');
-    expect(rook?.pos).toEqual({ x: 7, y: 5 });
-    expect(result.events.some((e) => e.type === 'Teleported')).toBe(true);
+    expect(enter.ok).toBe(true);
+    if (!enter.ok) return;
+    expect(enter.state.pieces.find((p) => p.id === 'r1')?.pos).toEqual({ x: 0, y: 2 });
+    expect(enter.events.some((e) => e.type === 'Teleported')).toBe(false);
+
+    // Black pass-ish move
+    const black = applyCommand(enter.state, {
+      type: 'move',
+      from: { x: 4, y: 7 },
+      to: { x: 4, y: 6 },
+    });
+    expect(black.ok).toBe(true);
+    if (!black.ok) return;
+
+    const caveMoves = getLegalMoves(black.state, { x: 0, y: 2 });
+    expect(caveMoves.some((m) => m.to.x === 7 && m.to.y === 5)).toBe(true);
+
+    const warp = applyCommand(black.state, {
+      type: 'move',
+      from: { x: 0, y: 2 },
+      to: { x: 7, y: 5 },
+    });
+    expect(warp.ok).toBe(true);
+    if (!warp.ok) return;
+    expect(warp.state.pieces.find((p) => p.id === 'r1')?.pos).toEqual({ x: 7, y: 5 });
   });
 
   it('spikes kill after a grace own-turn if piece stays', () => {
@@ -372,25 +393,45 @@ describe('anchor king', () => {
 });
 
 describe('cryomancer freeze', () => {
-  it('freezes instead of capturing and blocks target for a turn', () => {
+  it('freezes in range, blocks cooldown, and rejects immediate re-freeze', () => {
     const state = blankMatch([
       createPieceInstance('cryomancer', 'white', { x: 0, y: 0 }, 'cq'),
-      createPieceInstance('pawn', 'black', { x: 0, y: 3 }, 'bp'),
+      createPieceInstance('pawn', 'black', { x: 2, y: 2 }, 'bp'),
       createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
       createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
     ]);
+    const freezeMoves = getLegalMoves(state, { x: 0, y: 0 }).filter((m) => m.captures);
+    expect(freezeMoves.some((m) => m.to.x === 2 && m.to.y === 2)).toBe(true);
+
     const result = applyCommand(state, {
       type: 'move',
       from: { x: 0, y: 0 },
-      to: { x: 0, y: 3 },
+      to: { x: 2, y: 2 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.pieces.find((p) => p.id === 'cq')?.pos).toEqual({ x: 0, y: 0 });
     expect(result.state.pieces.find((p) => p.id === 'bp')?.frozenTurns).toBe(1);
-    expect(result.state.pieces.find((p) => p.id === 'cq')?.freezeCooldown).toBeGreaterThan(0);
+    expect(result.state.pieces.find((p) => p.id === 'cq')?.freezeCooldown).toBe(3);
     expect(result.events.some((e) => e.type === 'Frozen')).toBe(true);
-    expect(getLegalMoves(result.state, { x: 0, y: 3 })).toHaveLength(0);
+
+    // Black king step
+    const black = applyCommand(result.state, {
+      type: 'move',
+      from: { x: 4, y: 7 },
+      to: { x: 5, y: 7 },
+    });
+    expect(black.ok).toBe(true);
+    if (!black.ok) return;
+
+    expect(getLegalMoves(black.state, { x: 0, y: 0 }).filter((m) => m.captures)).toHaveLength(0);
+
+    const again = applyCommand(black.state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 2, y: 2 },
+    });
+    expect(again.ok).toBe(false);
   });
 });
 
@@ -458,5 +499,99 @@ describe('exchanger allySwap', () => {
     expect(result.state.pieces.find((p) => p.id === 'ex')?.pos).toEqual({ x: 4, y: 2 });
     expect(result.state.pieces.find((p) => p.id === 'pw')?.pos).toEqual({ x: 2, y: 0 });
     expect(result.state.pieces.find((p) => p.id === 'ex')?.abilitiesUsed.allySwap).toBe(true);
+  });
+});
+
+describe('new tiles', () => {
+  it('wind pushes backward after the opponent turn when free', () => {
+    const state = blankMatch(
+      [
+        createPieceInstance('rook', 'white', { x: 3, y: 1 }, 'r1'),
+        createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+        createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+      ],
+      [{ pos: { x: 3, y: 2 }, tileId: 'wind' }],
+    );
+    const land = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 1 },
+      to: { x: 3, y: 2 },
+    });
+    expect(land.ok).toBe(true);
+    if (!land.ok) return;
+    // Still on wind after own turn
+    expect(land.state.pieces.find((p) => p.id === 'r1')?.pos).toEqual({ x: 3, y: 2 });
+    expect(land.state.pieces.find((p) => p.id === 'r1')?.windPending).toBe(true);
+
+    const black = applyCommand(land.state, {
+      type: 'move',
+      from: { x: 4, y: 7 },
+      to: { x: 5, y: 7 },
+    });
+    expect(black.ok).toBe(true);
+    if (!black.ok) return;
+    // Pushed back after opponent moved
+    expect(black.state.pieces.find((p) => p.id === 'r1')?.pos).toEqual({ x: 3, y: 1 });
+  });
+
+  it('forest grants shield against capture', () => {
+    const setup = blankMatch(
+      [
+        createPieceInstance('rook', 'white', { x: 0, y: 0 }, 'rw'),
+        createPieceInstance('pawn', 'black', { x: 0, y: 4 }, 'bp'),
+        createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+        createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+      ],
+      [{ pos: { x: 0, y: 3 }, tileId: 'forest' }],
+    );
+    const w1 = applyCommand(setup, { type: 'move', from: { x: 0, y: 0 }, to: { x: 0, y: 1 } });
+    expect(w1.ok).toBe(true);
+    if (!w1.ok) return;
+    const b1 = applyCommand(w1.state, { type: 'move', from: { x: 0, y: 4 }, to: { x: 0, y: 3 } });
+    expect(b1.ok).toBe(true);
+    if (!b1.ok) return;
+    expect(b1.state.pieces.find((p) => p.id === 'bp')?.shieldTurns).toBeGreaterThan(0);
+    expect(getLegalMoves(b1.state, { x: 0, y: 1 }).some((m) => m.captures)).toBe(false);
+  });
+
+  it('mushroom heals and becomes plain', () => {
+    const state = blankMatch(
+      [
+        createPieceInstance('rook', 'white', { x: 0, y: 0 }, 'r1'),
+        createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+        createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+      ],
+      [{ pos: { x: 0, y: 2 }, tileId: 'mushroom' }],
+    );
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 2 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'r1')?.hp).toBe(2);
+    expect(result.state.board.tiles[2]![0]).toBe('plain');
+  });
+});
+
+describe('symmetric battlefield', () => {
+  it('places three mirrored pairs of distinct types from seed', () => {
+    const a = generateSymmetricBattlefield(123);
+    const b = generateSymmetricBattlefield(123);
+    expect(a.tiles).toEqual(b.tiles);
+    const types = new Set<string>();
+    let special = 0;
+    for (let y = 0; y < 8; y++) {
+      for (let x = 0; x < 8; x++) {
+        const id = a.tiles[y]![x]!;
+        if (id === 'plain') continue;
+        special += 1;
+        types.add(id);
+        expect(a.tiles[7 - y]![7 - x]).toBe(id);
+      }
+    }
+    expect(special).toBe(6);
+    expect(types.size).toBe(3);
   });
 });

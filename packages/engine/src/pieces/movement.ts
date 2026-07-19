@@ -1,6 +1,6 @@
 import type { Coord, PlayerId } from '../board/types.js';
 import { coordsEqual, inBounds } from '../board/types.js';
-import { getTileDef, isPassable } from '../board/board.js';
+import { findCavePartner, getTileDef, isPassable } from '../board/board.js';
 import { getPieceDefinition } from '../defs/catalog.js';
 import type {
   AbilityId,
@@ -106,6 +106,7 @@ function tryAddMove(
     return 'empty';
   }
   if (mover && occupant.owner === mover.owner) return 'blocked';
+  if ((occupant.shieldTurns ?? 0) > 0) return 'blocked';
   if (mode === 'capture' || mode === 'both') {
     out.push({
       from,
@@ -267,6 +268,38 @@ function addCastlingMoves(state: MatchState, piece: PieceInstance, out: LegalMov
   }
 }
 
+function addCaveMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+  const tile = getTileDef(state.board, piece.pos);
+  if (!tile?.caveGroup) return;
+  const partner = findCavePartner(state.board, piece.pos);
+  if (!partner) return;
+  if (!isPassable(state.board, partner)) return;
+  if (pieceAt(state, partner)) return;
+  out.push({
+    from: { ...piece.pos },
+    to: { ...partner },
+    captures: false,
+  });
+}
+
+function addFreezeTargets(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+  const def = getPieceDefinition(piece.defId);
+  if (!def.freezeInsteadOfCapture) return;
+  if ((piece.freezeCooldown ?? 0) > 0) return;
+  const range = def.freezeRange ?? 3;
+  for (const enemy of state.pieces) {
+    if (enemy.owner === piece.owner) continue;
+    if ((enemy.shieldTurns ?? 0) > 0) continue;
+    if (chebyshev(piece.pos, enemy.pos) > range) continue;
+    out.push({
+      from: { ...piece.pos },
+      to: { ...enemy.pos },
+      captures: true,
+      targetPieceId: enemy.id,
+    });
+  }
+}
+
 function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.abilities) return;
@@ -379,11 +412,13 @@ export function getLegalMovesForPiece(
   if (def.immobile) return [];
 
   const moves: LegalMove[] = [];
-  const freezeReady =
-    !def.freezeInsteadOfCapture || (piece.freezeCooldown ?? 0) <= 0;
-  const captureMode = def.cannotCapture || !freezeReady ? 'quiet' : 'both';
 
-  if (def.splitCapture && def.captureOffsets && !def.cannotCapture && freezeReady) {
+  if (def.freezeInsteadOfCapture) {
+    for (const pattern of def.movement) {
+      moves.push(...expandPattern(state, piece, pattern, 'quiet'));
+    }
+    addFreezeTargets(state, piece, moves);
+  } else if (def.splitCapture && def.captureOffsets && !def.cannotCapture) {
     for (const pattern of def.movement) {
       moves.push(...expandPattern(state, piece, pattern, 'quiet'));
     }
@@ -397,12 +432,14 @@ export function getLegalMovesForPiece(
       tryAddMove(state, piece.pos, to, 'capture', moves);
     }
   } else {
+    const captureMode = def.cannotCapture ? 'quiet' : 'both';
     for (const pattern of def.movement) {
       moves.push(...expandPattern(state, piece, pattern, captureMode));
     }
   }
 
   addAbilityMoves(state, piece, moves);
+  addCaveMoves(state, piece, moves);
   addCastlingMoves(state, piece, moves);
 
   const buffed = getBuffedPieceIds(state);

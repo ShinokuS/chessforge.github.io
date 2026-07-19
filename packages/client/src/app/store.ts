@@ -272,7 +272,14 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       set({ clocks: next });
     },
-    dismissEndBanner: () => set({ endBanner: null }),
+    dismissEndBanner: () => {
+      const { battleMode } = get();
+      if (battleMode === 'ai') {
+        set({ endBanner: null, aiPlaying: false, selected: null });
+        return;
+      }
+      set({ endBanner: null });
+    },
     submitMove: (to) => {
       const { selected, battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying } =
         get();

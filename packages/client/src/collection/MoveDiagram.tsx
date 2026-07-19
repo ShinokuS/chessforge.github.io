@@ -58,7 +58,7 @@ function expandPattern(
 function buildCells(def: PieceDefinition): Map<string, CellKind> {
   const quiet = new Set<string>();
   const capture = new Set<string>();
-  const quietOnly = Boolean(def.cannotCapture);
+  const quietOnly = Boolean(def.cannotCapture || def.freezeInsteadOfCapture);
 
   if (def.splitCapture && def.captureOffsets) {
     for (const pattern of def.movement) {
@@ -74,6 +74,19 @@ function buildCells(def: PieceDefinition): Map<string, CellKind> {
   } else {
     for (const pattern of def.movement) {
       expandPattern(pattern, quiet, capture, quietOnly ? 'quiet' : 'both');
+    }
+  }
+
+  // Cryomancer: show freeze radius as capture cells
+  if (def.freezeInsteadOfCapture) {
+    const range = def.freezeRange ?? 3;
+    for (let dy = -range; dy <= range; dy++) {
+      for (let dx = -range; dx <= range; dx++) {
+        if (dx === 0 && dy === 0) continue;
+        const x = ORIGIN + dx;
+        const y = ORIGIN + dy;
+        if (inBoard(x, y)) capture.add(key(x, y));
+      }
     }
   }
 

@@ -55,16 +55,19 @@ export function BattleView() {
       onlineClocksStarted.current = false;
       return;
     }
-    const status = online.getStatus();
-    if (status === 'playing' && !onlineClocksStarted.current) {
-      onlineClocksStarted.current = true;
-      resetClocks('white', online.getMatchClockMs());
-      return;
-    }
-    if (status !== 'playing') {
-      onlineClocksStarted.current = false;
-    }
-  }, [battleMode, online, resetClocks, tick]);
+    return online.subscribeStatus(() => {
+      const status = online.getStatus();
+      if (status === 'playing') {
+        if (!onlineClocksStarted.current) {
+          onlineClocksStarted.current = true;
+          const ms = online.getMatchClockMs();
+          resetClocks('white', ms > 0 ? ms : timePresetMs(onlineTimePreset));
+        }
+      } else {
+        onlineClocksStarted.current = false;
+      }
+    });
+  }, [battleMode, online, resetClocks, onlineTimePreset]);
 
   const [joinCode, setJoinCode] = useState(() => {
     if (typeof window === 'undefined') return '';
@@ -111,16 +114,15 @@ export function BattleView() {
       onlineStatus === 'connecting');
 
   const boardVisible =
-    (battleMode === 'ai' && (aiPlaying || Boolean(endBanner) || state.phase === 'gameOver')) ||
+    (battleMode === 'ai' && (aiPlaying || Boolean(endBanner))) ||
     onlineStatus === 'waiting' ||
     onlineStatus === 'playing' ||
-    (battleMode === 'online' && state.phase === 'gameOver');
+    (battleMode === 'online' && (Boolean(endBanner) || state.phase === 'gameOver'));
 
   const showClocks =
-    (battleMode === 'ai' && aiPlaying) ||
+    (battleMode === 'ai' && (aiPlaying || Boolean(endBanner))) ||
     onlineStatus === 'playing' ||
-    Boolean(endBanner) ||
-    (battleMode === 'online' && state.phase === 'gameOver');
+    (battleMode === 'online' && (Boolean(endBanner) || state.phase === 'gameOver'));
 
   const placements = () => {
     const deck = repo.getDeck(activeDeckId);

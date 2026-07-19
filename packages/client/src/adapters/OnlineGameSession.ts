@@ -188,7 +188,10 @@ export class OnlineGameSession {
     if (msg.type === 'matchStart' && !this.isHost) {
       this.roomId = msg.roomId;
       this.myColor = msg.yourColor;
-      this.matchClockMs = msg.clockMs > 0 ? msg.clockMs : INITIAL_CLOCK_MS;
+      this.matchClockMs =
+        Number.isFinite(msg.clockMs) && msg.clockMs > 0
+          ? Math.floor(msg.clockMs)
+          : INITIAL_CLOCK_MS;
       this.state = createMatchFromPlacements(msg.white, msg.black, msg.seed);
       this.lastError = null;
       this.setStatus('playing');
@@ -258,7 +261,10 @@ export class OnlineGameSession {
     this.hostPlacements = placements;
     this.hostSide = options.side;
     this.hostColor = resolveSide(options.side);
-    this.matchClockMs = options.clockMs > 0 ? options.clockMs : INITIAL_CLOCK_MS;
+    this.matchClockMs =
+      Number.isFinite(options.clockMs) && options.clockMs > 0
+        ? Math.floor(options.clockMs)
+        : INITIAL_CLOCK_MS;
     this.myColor = this.hostColor;
     this.setStatus('connecting');
 

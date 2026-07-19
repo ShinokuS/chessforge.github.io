@@ -8,6 +8,9 @@ const TILE_SWATCH: Record<string, string | undefined> = {
   mountain: styles.swatchMountain,
   cave: styles.swatchCave,
   lake: styles.swatchLake,
+  wind: styles.swatchWind,
+  forest: styles.swatchForest,
+  mushroom: styles.swatchMushroom,
 };
 
 export function LibraryView() {

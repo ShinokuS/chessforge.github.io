@@ -1,4 +1,5 @@
 import { createRectBoard, withTileOverrides } from '../board/board.js';
+import { generateSymmetricBattlefield } from '../board/generate.js';
 import { getPieceDefinition } from '../defs/catalog.js';
 import type { Coord, PlayerId } from '../board/types.js';
 import type { MatchConfig, MatchState, PieceInstance } from './types.js';
@@ -34,6 +35,8 @@ export function createPieceInstance(
     spikeTicks: 0,
     frozenTurns: 0,
     freezeCooldown: 0,
+    windPending: false,
+    shieldTurns: 0,
   };
 }
 
@@ -48,6 +51,8 @@ export function createMatch(config: MatchConfig): MatchState {
       freezeCooldown: p.freezeCooldown ?? 0,
       spikeArmed: p.spikeArmed ?? false,
       spikeTicks: p.spikeTicks ?? 0,
+      windPending: p.windPending ?? false,
+      shieldTurns: p.shieldTurns ?? 0,
     })),
     activePlayer: config.activePlayer ?? 'white',
     turn: 1,
@@ -76,6 +81,7 @@ export function spawnFromPlacements(
   return pieces;
 }
 
+/** Fixed demo layout (tests / preview). Prefer generateSymmetricBattlefield for matches. */
 export function createBattlefieldBoard() {
   return withTileOverrides(createRectBoard(8, 8, 'plain'), [
     { pos: { x: 2, y: 3 }, tileId: 'mud' },
@@ -111,7 +117,7 @@ export function createMatchFromPlacements(
 ): MatchState {
   resetPieceIdCounter(1);
   return createMatch({
-    board: createBattlefieldBoard(),
+    board: generateSymmetricBattlefield(seed),
     pieces: [
       ...spawnFromPlacements(white, 'white'),
       ...spawnFromPlacements(black, 'black'),

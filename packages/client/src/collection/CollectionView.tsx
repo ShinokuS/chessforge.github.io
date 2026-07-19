@@ -16,19 +16,25 @@ export function CollectionView() {
   const repo = useAppStore((s) => s.repo);
   const refreshMeta = useAppStore((s) => s.refreshMeta);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
 
   const grouped = useMemo(() => {
+    const q = query.trim().toLowerCase();
     const byRole = new Map<PieceRole, typeof cards>();
     for (const role of ROLE_ORDER) byRole.set(role, []);
     for (const card of cards) {
       const def = getPieceDefinition(card.defId);
+      if (q) {
+        const hay = `${def.name} ${def.id} ${def.description}`.toLowerCase();
+        if (!hay.includes(q)) continue;
+      }
       byRole.get(def.baseRole)?.push(card);
     }
     return ROLE_ORDER.map((role) => ({
       role,
       cards: byRole.get(role) ?? [],
     })).filter((g) => g.cards.length > 0);
-  }, [cards]);
+  }, [cards, query]);
 
   return (
     <section className={styles.wrap}>
@@ -38,63 +44,79 @@ export function CollectionView() {
           Карты сгруппированы по базовой шахматной роли. Модификации занимают тот же слот
           при сборе колоды.
         </p>
-        <button
-          type="button"
-          onClick={() => {
-            repo.resetToStarter();
-            refreshMeta();
-          }}
-        >
-          Сбросить стартовый набор
-        </button>
+        <div className={styles.headActions}>
+          <label className={styles.search}>
+            <span className={styles.searchLabel}>Поиск</span>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Название фигуры…"
+              autoComplete="off"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              repo.resetToStarter();
+              refreshMeta();
+            }}
+          >
+            Сбросить стартовый набор
+          </button>
+        </div>
       </div>
 
-      {grouped.map(({ role, cards: roleCards }) => (
-        <div key={role} className={styles.group}>
-          <h3 className={styles.groupTitle}>{ROLE_LABELS[role]}</h3>
-          <ul className={styles.list}>
-            {roleCards.map((card) => {
-              const def = getPieceDefinition(card.defId);
-              const open = openId === card.defId;
-              return (
-                <li
-                  key={card.defId}
-                  className={[styles.item, open ? styles.itemOpen : '']
-                    .filter(Boolean)
-                    .join(' ')}
-                >
-                  <button
-                    type="button"
-                    className={styles.itemHeader}
-                    onClick={() => setOpenId(open ? null : card.defId)}
-                    aria-expanded={open}
+      {grouped.length === 0 ? (
+        <p className={styles.empty}>Ничего не найдено по запросу «{query.trim()}».</p>
+      ) : (
+        grouped.map(({ role, cards: roleCards }) => (
+          <div key={role} className={styles.group}>
+            <h3 className={styles.groupTitle}>{ROLE_LABELS[role]}</h3>
+            <ul className={styles.list}>
+              {roleCards.map((card) => {
+                const def = getPieceDefinition(card.defId);
+                const open = openId === card.defId;
+                return (
+                  <li
+                    key={card.defId}
+                    className={[styles.item, open ? styles.itemOpen : '']
+                      .filter(Boolean)
+                      .join(' ')}
                   >
-                    <span className={styles.glyph}>
-                      <PieceIcon defId={card.defId} owner="white" />
-                    </span>
-                    <span className={styles.body}>
-                      <span className={styles.titleRow}>
-                        <strong>{def.name}</strong>
-                        {!def.isBase && <span className={styles.mod}>модификация</span>}
+                    <button
+                      type="button"
+                      className={styles.itemHeader}
+                      onClick={() => setOpenId(open ? null : card.defId)}
+                      aria-expanded={open}
+                    >
+                      <span className={styles.glyph}>
+                        <PieceIcon defId={card.defId} owner="white" />
                       </span>
-                      <span className={styles.meta}>
-                        {def.rarity} · cost {def.cost} · ×{card.count} · слот:{' '}
-                        {ROLE_LABELS[def.baseRole]}
+                      <span className={styles.body}>
+                        <span className={styles.titleRow}>
+                          <strong>{def.name}</strong>
+                          {!def.isBase && <span className={styles.mod}>модификация</span>}
+                        </span>
+                        <span className={styles.meta}>
+                          {def.rarity} · cost {def.cost} · ×{card.count} · слот:{' '}
+                          {ROLE_LABELS[def.baseRole]}
+                        </span>
                       </span>
-                    </span>
-                  </button>
-                  {open && (
-                    <div className={styles.details}>
-                      <p className={styles.desc}>{def.description}</p>
-                      <MoveDiagram def={def} />
-                    </div>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      ))}
+                    </button>
+                    {open && (
+                      <div className={styles.details}>
+                        <p className={styles.desc}>{def.description}</p>
+                        <MoveDiagram def={def} />
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))
+      )}
     </section>
   );
 }

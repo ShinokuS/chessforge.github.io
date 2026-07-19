@@ -54,5 +54,13 @@ Workflow → ветка `gh-pages`. Добавьте те же `VITE_FIREBASE_*`
 
 ## Деплой (Vercel)
 
-Root Directory — корень репо. Output — `dist` (`vercel.json`).  
+Root Directory — **пусто** (корень репо), не `packages/client`. Output — `dist` (корневой `vercel.json`).
+
+Ветка продакшена должна быть **`main`**, не `gh-pages` (на `gh-pages` только статика для GitHub Pages).
+
+Где сменить ветку в UI Vercel:
+1. Project → **Settings** → **Environments** → **Production** → **Branch Tracking** → `main` → Save  
+   (или Settings → **Domains** → у домена выбрать branch `main`)
+2. Deployments → **Create Deployment** → ветка `main` → Deploy
+
 Те же `VITE_FIREBASE_*` в Project → Environment Variables.

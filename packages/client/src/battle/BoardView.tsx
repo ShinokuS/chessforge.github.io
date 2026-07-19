@@ -15,6 +15,9 @@ const TILE_MARK: Record<string, string> = {
   mountain: '▲',
   cave: '◉',
   lake: '⁓',
+  wind: '≋',
+  forest: '♣',
+  mushroom: '✦',
 };
 
 const ABILITY_LABEL: Record<string, string> = {
@@ -88,6 +91,7 @@ export function BoardView() {
       const tileDef = getTileDefinition(tileId);
       const spiked = Boolean(piece?.spikeArmed);
       const frozen = (piece?.frozenTurns ?? 0) > 0;
+      const shielded = (piece?.shieldTurns ?? 0) > 0;
 
       const classNames = [
         styles.cell,
@@ -97,12 +101,16 @@ export function BoardView() {
         tileId === 'mountain' ? styles.mountain : '',
         tileId === 'cave' ? styles.cave : '',
         tileId === 'lake' ? styles.lake : '',
+        tileId === 'wind' ? styles.wind : '',
+        tileId === 'forest' ? styles.forest : '',
+        tileId === 'mushroom' ? styles.mushroom : '',
         isSelected ? styles.selected : '',
         isLastFrom || isLastTo ? styles.lastMove : '',
         move && !move.captures ? styles.canMove : '',
         move?.captures ? styles.canCapture : '',
         spiked ? styles.spikeDoom : '',
         frozen ? styles.freezeDoom : '',
+        shielded ? styles.shieldAura : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -165,9 +173,17 @@ export function BoardView() {
             {(hoverPiece?.frozenTurns ?? 0) > 0 && (
               <p className={styles.warn}>Заморожена: не может ходить в этот ход.</p>
             )}
+            {(hoverPiece?.shieldTurns ?? 0) > 0 && (
+              <p className={styles.warn}>Щит леса: неуязвима к ударам и заморозке.</p>
+            )}
             {hoverPiece && (hoverPiece.freezeCooldown ?? 0) > 0 && hoverDef?.freezeInsteadOfCapture && (
               <p className={styles.warn}>
                 Перезарядка заморозки: ещё {hoverPiece.freezeCooldown} ход(а).
+              </p>
+            )}
+            {hoverPiece?.windPending && (
+              <p className={styles.warn}>
+                Ветер: после хода противника будет снос назад, если клетка свободна.
               </p>
             )}
             {hoverPiece && hoverDef && (

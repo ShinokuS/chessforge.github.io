@@ -21,10 +21,16 @@ export type TileDefinition = {
   /** Bonus applied to leap step length / slide range for listed roles. */
   rangeBonus?: number;
   rangeBonusRoles?: ReadonlyArray<PieceRole>;
-  /** Shared id: stepping on one cave teleports to the other empty cave. */
+  /** Shared id: standing on a cave allows a move to the partner cave. */
   caveGroup?: string;
   /** Entering arms delayed death; still on tile at start of next own turn → die. */
   spikesDoom?: boolean;
+  /** After landing, at end of that turn push 1 square backward if free. */
+  windPush?: boolean;
+  /** Landing grants temporary damage immunity. */
+  forestShield?: boolean;
+  /** Landing heals +1 HP, then tile becomes plain. */
+  mushroomHeal?: boolean;
 };
 
 export type BoardSpec = {
@@ -70,7 +76,9 @@ export type PieceDefinition = {
    * Attacker stays put; target skips its next turn; freezeCooldown applies.
    */
   freezeInsteadOfCapture?: boolean;
-  /** Own turns after a freeze before this piece can freeze again. */
+  /** Chebyshev radius for freeze targets (default 3). */
+  freezeRange?: number;
+  /** Own turns the piece cannot freeze after using freeze. */
   freezeCooldownTurns?: number;
   /** If true, piece never generates legal moves (even from buffs / castling). */
   immobile?: boolean;
@@ -108,8 +116,12 @@ export type PieceInstance = {
   spikeTicks: number;
   /** Remaining own turns this piece cannot move (freeze). */
   frozenTurns: number;
-  /** Remaining own turns before freeze-capture is available again. */
+  /** Remaining own turns before freeze is available again (>0 = blocked). */
   freezeCooldown: number;
+  /** Push pending from wind: fires after the opponent's turn. */
+  windPending: boolean;
+  /** Remaining owner-turn ticks of forest damage immunity. */
+  shieldTurns: number;
 };
 
 export type MatchPhase = 'play' | 'gameOver';
