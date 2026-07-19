@@ -22,3 +22,14 @@ pnpm dev
 ## Деплой (GitHub Pages)
 
 Workflow публикует сборку в ветку `gh-pages`. В Settings → Pages укажите branch **`gh-pages`** / root.
+
+## Деплой (Vercel)
+
+Импортируйте **корень** репозитория (не `packages/client`).
+
+В настройках проекта:
+- **Root Directory** — пусто (`.`)
+- **Framework** — Other
+- конфиг берётся из `vercel.json` (сборка monorepo → `packages/client/dist`)
+
+`VITE_BASE` не задавайте (по умолчанию `/`).

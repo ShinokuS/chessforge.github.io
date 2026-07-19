@@ -1,0 +1,8 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "pnpm install",
+  "buildCommand": "pnpm --filter @chessforge/engine build && pnpm --filter @chessforge/ai build && pnpm --filter @chessforge/client build",
+  "outputDirectory": "packages/client/dist",
+  "rewrites": [{ "source": "/((?!assets/).*)", "destination": "/index.html" }]
+}
