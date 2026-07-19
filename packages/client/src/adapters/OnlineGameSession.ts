@@ -11,11 +11,8 @@ import {
   type PlayerId,
 } from '@chessforge/engine';
 import type { GameSessionListener } from './GameSession';
-import {
-  peerIdForRoom,
-  randomRoomCode,
-  type PeerMessage,
-} from '../online/protocol';
+import { randomRoomCode, type PeerMessage } from '../online/protocol';
+import { isFirebaseConfigured, RoomBus } from '../online/roomBus';
 import { validatePlacements } from '../online/validate';
 import { resolveSide, type SidePreference } from '../battle/settings';
 import { INITIAL_CLOCK_MS } from '../battle/clock';
@@ -33,41 +30,9 @@ export type CreateRoomOptions = {
   side: SidePreference;
 };
 
-type PeerCtor = new (...args: any[]) => PeerInstance;
-
-type PeerInstance = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on(event: string, cb: (...args: any[]) => void): void;
-  connect(id: string, options?: { reliable?: boolean }): DataConn;
-  destroy(): void;
-};
-
-type DataConn = {
-  open: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on(event: string, cb: (...args: any[]) => void): void;
-  send(data: unknown): void;
-  close(): void;
-};
-
-async function loadPeer(): Promise<PeerCtor> {
-  const mod = await import('peerjs');
-  if (typeof mod.Peer === 'function') return mod.Peer as unknown as PeerCtor;
-  const d = mod.default as unknown;
-  if (typeof d === 'function') return d as PeerCtor;
-  if (
-    d &&
-    typeof d === 'object' &&
-    typeof (d as { Peer?: PeerCtor }).Peer === 'function'
-  ) {
-    return (d as { Peer: PeerCtor }).Peer;
-  }
-  throw new Error('PeerJS не загрузился');
-}
-
 /**
- * P2P via PeerJS Cloud — works from static GitHub Pages, no self-hosted server.
- * Host browser is authoritative for match state.
+ * Online via Firebase Realtime Database (HTTPS).
+ * No WebRTC / PeerJS — works on GitHub Pages & Vercel through VPN.
  */
 export class OnlineGameSession {
   private state: MatchState = createDemoMatch();
@@ -81,10 +46,10 @@ export class OnlineGameSession {
   private hostSide: SidePreference = 'white';
   private hostColor: PlayerId = 'white';
 
-  private peer: PeerInstance | null = null;
-  private conn: DataConn | null = null;
+  private bus: RoomBus | null = null;
   private hostPlacements: FormationPlacement[] | null = null;
   private isHost = false;
+  private guestSeen = false;
 
   getState(): MatchState {
     return this.state;
@@ -153,31 +118,29 @@ export class OnlineGameSession {
   }
 
   private send(msg: PeerMessage): void {
-    if (!this.conn?.open) {
-      this.fail('Нет соединения с соперником');
+    if (!this.bus) {
+      this.fail('Нет соединения');
       return;
     }
-    this.conn.send(msg);
+    void this.bus.send(msg).catch(() => {
+      this.fail('Не удалось отправить сообщение');
+    });
   }
 
   private guestColor(): PlayerId {
     return this.myColor === 'white' ? 'black' : 'white';
   }
 
-  private bindConnection(conn: DataConn): void {
-    this.conn = conn;
-    conn.on('data', (raw: unknown) => {
-      this.onPeerMessage(raw as PeerMessage);
-    });
-    conn.on('close', () => {
+  private bindBus(bus: RoomBus): void {
+    this.bus = bus;
+    bus.onMessage((msg) => this.onPeerMessage(msg));
+    bus.onPeerLeft(() => {
       if (this.status === 'playing' || this.status === 'waiting') {
+        if (this.isHost && !this.guestSeen) return;
         this.lastError = 'Соперник отключился';
         this.setStatus('disconnected');
         this.emit([]);
       }
-    });
-    conn.on('error', () => {
-      this.fail('Ошибка канала связи');
     });
   }
 
@@ -189,6 +152,7 @@ export class OnlineGameSession {
     }
 
     if (msg.type === 'guestHello' && this.isHost) {
+      this.guestSeen = true;
       const err = validatePlacements(msg.placements);
       if (err) {
         this.send({ type: 'error', message: err });
@@ -272,21 +236,6 @@ export class OnlineGameSession {
     }
   }
 
-  private destroyPeer(): void {
-    try {
-      this.conn?.close();
-    } catch {
-      /* ignore */
-    }
-    try {
-      this.peer?.destroy();
-    } catch {
-      /* ignore */
-    }
-    this.conn = null;
-    this.peer = null;
-  }
-
   async createRoom(
     placements: FormationPlacement[],
     options: CreateRoomOptions,
@@ -296,9 +245,16 @@ export class OnlineGameSession {
       this.fail(err);
       return;
     }
+    if (!isFirebaseConfigured()) {
+      this.fail(
+        'Онлайн не настроен: задайте VITE_FIREBASE_* (Firebase Realtime Database). Инструкция в README.',
+      );
+      return;
+    }
 
     this.disconnect();
     this.isHost = true;
+    this.guestSeen = false;
     this.hostPlacements = placements;
     this.hostSide = options.side;
     this.hostColor = resolveSide(options.side);
@@ -306,78 +262,39 @@ export class OnlineGameSession {
     this.myColor = this.hostColor;
     this.setStatus('connecting');
 
-    let Peer: PeerCtor;
     try {
-      Peer = await loadPeer();
-    } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
-      return;
-    }
-
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 6; attempt++) {
       const roomId = randomRoomCode();
-      const peer = new Peer(peerIdForRoom(roomId), { debug: 0 });
-      this.peer = peer;
+      const bus = await RoomBus.createHost(roomId);
+      this.roomId = roomId;
+      this.bindBus(bus);
 
-      try {
-        await new Promise<void>((resolve, reject) => {
-          peer.on('open', () => resolve());
-          peer.on('error', (e) => reject(e));
-        });
-
-        this.roomId = roomId;
-        const previewWhite =
-          this.hostColor === 'black' ? classicBasePlacements() : placements;
-        const previewBlack =
-          this.hostColor === 'black' ? placements : classicBasePlacements();
-        this.state = createMatchFromPlacements(
-          previewWhite,
-          previewBlack,
-          (Date.now() >>> 0) || 1,
-        );
-        this.setStatus('waiting');
-        this.lastError = null;
-        this.emit([]);
-
-        peer.on('connection', (conn) => {
-          if (this.conn?.open) {
-            conn.close();
-            return;
-          }
-          this.bindConnection(conn);
-        });
-
-        peer.on('disconnected', () => {
-          if (this.status === 'waiting' || this.status === 'playing') {
-            this.lastError = 'Потеряно соединение с сетью PeerJS';
-            this.setStatus('disconnected');
-            this.emit([]);
-          }
-        });
-        return;
-      } catch (e) {
-        lastError = e;
-        try {
-          peer.destroy();
-        } catch {
-          /* ignore */
-        }
-        this.peer = null;
-      }
+      const previewWhite =
+        this.hostColor === 'black' ? classicBasePlacements() : placements;
+      const previewBlack =
+        this.hostColor === 'black' ? placements : classicBasePlacements();
+      this.state = createMatchFromPlacements(
+        previewWhite,
+        previewBlack,
+        (Date.now() >>> 0) || 1,
+      );
+      this.setStatus('waiting');
+      this.lastError = null;
+      this.emit([]);
+    } catch (e) {
+      this.fail(e instanceof Error ? e.message : 'Не удалось создать комнату');
     }
-
-    this.fail(
-      lastError instanceof Error
-        ? lastError.message
-        : 'Не удалось создать комнату. Попробуйте ещё раз.',
-    );
   }
 
   async joinRoom(roomId: string, placements: FormationPlacement[]): Promise<void> {
     const err = validatePlacements(placements);
     if (err) {
       this.fail(err);
+      return;
+    }
+    if (!isFirebaseConfigured()) {
+      this.fail(
+        'Онлайн не настроен: задайте VITE_FIREBASE_* (Firebase Realtime Database). Инструкция в README.',
+      );
       return;
     }
 
@@ -394,50 +311,15 @@ export class OnlineGameSession {
     this.roomId = code;
     this.setStatus('connecting');
 
-    let Peer: PeerCtor;
     try {
-      Peer = await loadPeer();
-    } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
-      return;
-    }
-
-    const peer = new Peer({ debug: 0 });
-    this.peer = peer;
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        peer.on('open', () => resolve());
-        peer.on('error', (e) => reject(e));
-      });
-    } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'Не удалось подключиться');
-      return;
-    }
-
-    const conn = peer.connect(peerIdForRoom(code), { reliable: true });
-    this.bindConnection(conn);
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => {
-          reject(new Error('Комната не отвечает. Проверьте код и что хост ещё ждёт.'));
-        }, 15_000);
-        conn.on('open', () => {
-          clearTimeout(t);
-          resolve();
-        });
-        conn.on('error', (e) => {
-          clearTimeout(t);
-          reject(e);
-        });
-      });
+      const bus = await RoomBus.joinGuest(code);
+      this.bindBus(bus);
+      this.lastError = null;
+      this.emitStatus();
+      this.send({ type: 'guestHello', placements });
     } catch (e) {
       this.fail(e instanceof Error ? e.message : 'Не удалось войти в комнату');
-      return;
     }
-
-    this.send({ type: 'guestHello', placements });
   }
 
   submitCommand(command: GameCommand): boolean {
@@ -478,18 +360,17 @@ export class OnlineGameSession {
   }
 
   disconnect(): void {
-    if (this.conn?.open) {
-      try {
-        this.conn.send({ type: 'opponentLeft' } satisfies PeerMessage);
-      } catch {
-        /* ignore */
-      }
+    if (this.bus && (this.status === 'playing' || this.status === 'waiting')) {
+      void this.bus.send({ type: 'opponentLeft' });
     }
-    this.destroyPeer();
+    const bus = this.bus;
+    this.bus = null;
+    void bus?.close();
     this.roomId = null;
     this.myColor = null;
     this.hostPlacements = null;
     this.isHost = false;
+    this.guestSeen = false;
     this.hostSide = 'white';
     this.hostColor = 'white';
     this.matchClockMs = INITIAL_CLOCK_MS;

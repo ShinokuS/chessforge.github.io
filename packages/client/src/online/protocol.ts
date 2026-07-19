@@ -1,6 +1,6 @@
 import type { FormationPlacement, GameCommand, PlayerId } from '@chessforge/engine';
 
-/** Messages over PeerJS data connection (host is authoritative regardless of color). */
+/** Game messages between host and guest (host is authoritative). */
 export type PeerMessage =
   | { type: 'guestHello'; placements: FormationPlacement[] }
   | {
@@ -16,10 +16,6 @@ export type PeerMessage =
   | { type: 'commandRequest'; command: GameCommand }
   | { type: 'error'; message: string }
   | { type: 'opponentLeft' };
-
-export function peerIdForRoom(roomId: string): string {
-  return `chessforge-${roomId.toLowerCase()}`;
-}
 
 export function randomRoomCode(): string {
   const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';

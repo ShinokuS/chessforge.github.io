@@ -198,12 +198,13 @@
 }
 
 .playArea {
+  --board-size: min(100%, 560px);
   display: grid;
   grid-template-areas: 'inspect board side';
-  grid-template-columns: minmax(10rem, 13rem) minmax(0, 560px) minmax(10.5rem, 13.5rem);
+  grid-template-columns: minmax(10rem, 13rem) var(--board-size) minmax(10.5rem, 13.5rem);
   grid-template-rows: auto;
   gap: 0.65rem;
-  align-items: stretch;
+  align-items: start;
 }
 
 @media (max-width: 960px) {
@@ -211,7 +212,7 @@
     grid-template-areas:
       'board side'
       'inspect inspect';
-    grid-template-columns: minmax(0, 560px) minmax(10.5rem, 13.5rem);
+    grid-template-columns: var(--board-size) minmax(10.5rem, 13.5rem);
   }
 }
 
@@ -226,7 +227,8 @@
   }
 
   .sidePanel {
-    min-height: 16rem;
+    height: min(22rem, 70vh);
+    max-height: min(22rem, 70vh);
   }
 }
 
@@ -239,8 +241,12 @@
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
+  width: 100%;
+  height: var(--board-size);
+  max-height: var(--board-size);
   min-height: 0;
   min-width: 0;
+  overflow: hidden;
 }
 
 .roomBanner {
@@ -303,12 +309,13 @@
 }
 
 .history {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-height: 0;
   background: color-mix(in srgb, var(--bg2) 88%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent-dim) 55%, transparent);
   padding: 0.55rem 0.65rem;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .historyTitle {
@@ -316,6 +323,10 @@
   font-family: var(--font-display);
   font-size: 0.92rem;
   font-weight: 600;
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--bg2) 96%, transparent);
+  z-index: 1;
 }
 
 .historyEmpty {
