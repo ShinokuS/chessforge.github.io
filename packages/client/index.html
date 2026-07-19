@@ -13,6 +13,20 @@
   </head>
   <body>
     <div id="root">Загрузка Chessforge…</div>
+    <script>
+      // If the JS bundle never loads (wrong base / 404), surface it instead of spinning forever.
+      setTimeout(function () {
+        var root = document.getElementById('root');
+        if (root && /Загрузка Chessforge/.test(root.textContent || '')) {
+          root.innerHTML =
+            '<div style="margin:2rem;font-family:system-ui;max-width:36rem;color:#e8edd8">' +
+            '<h1 style="font-size:1.25rem">Не загрузились скрипты</h1>' +
+            '<p>Откройте консоль (F12 → Network) и проверьте, что <code>assets/*.js</code> отдаётся с кодом 200.</p>' +
+            '<p style="opacity:.75;font-size:.9rem">Ожидаемый адрес: страница репозитория GitHub Pages с завершающим <code>/</code>.</p>' +
+            '</div>';
+        }
+      }, 10000);
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

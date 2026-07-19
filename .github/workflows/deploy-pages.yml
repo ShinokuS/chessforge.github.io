@@ -34,9 +34,7 @@ jobs:
         run: pnpm --filter @chessforge/engine build && pnpm --filter @chessforge/ai build
 
       - name: Build client
-        env:
-          # Project Pages: https://<user>.github.io/<repo>/
-          VITE_BASE: /${{ github.event.repository.name }}/
+        # Relative base: works for /<repo>/ and for custom-domain root /
         run: pnpm --filter @chessforge/client build
 
       - name: SPA fallback for GitHub Pages
