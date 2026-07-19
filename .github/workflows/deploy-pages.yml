@@ -6,16 +6,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,22 +32,21 @@ jobs:
         run: pnpm --filter @chessforge/engine build && pnpm --filter @chessforge/ai build
 
       - name: Build client
-        # Relative base: works for /<repo>/ and for custom-domain root /
+        env:
+          # Project site: https://<user>.github.io/<repo>/
+          VITE_BASE: /${{ github.event.repository.name }}/
         run: pnpm --filter @chessforge/client build
 
-      - name: SPA fallback for GitHub Pages
-        run: cp packages/client/dist/index.html packages/client/dist/404.html
+      - name: SPA fallback + disable Jekyll
+        run: |
+          cp packages/client/dist/index.html packages/client/dist/404.html
+          touch packages/client/dist/.nojekyll
 
-      - uses: actions/upload-pages-artifact@v3
+      # Publish built static site to gh-pages branch (classic Pages source).
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: packages/client/dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: packages/client/dist
+          force_orphan: true
+          enable_jekyll: false

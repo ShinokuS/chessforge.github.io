@@ -6,11 +6,8 @@ import { fileURLToPath } from 'node:url';
 const root = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig(({ command }) => {
-  // Dev: absolute `/`.
-  // Prod: relative `./` so GitHub Pages works both as
-  //   https://user.github.io/<repo>/  and on a custom domain at `/`.
-  const base =
-    command === 'serve' ? '/' : process.env.VITE_BASE || './';
+  // Dev always `/`. CI sets VITE_BASE=/<repo>/ for project Pages.
+  const base = command === 'serve' ? '/' : process.env.VITE_BASE || '/';
 
   return {
     base,

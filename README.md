@@ -8,44 +8,32 @@
 - `@chessforge/ai` — поиск хода и сборка колоды ИИ
 - `@chessforge/client` — Vite + React (GitHub Pages)
 
-Онлайн работает **peer-to-peer через PeerJS** (без отдельного игрового сервера), поэтому сайт можно хостить как статику на GitHub Pages.
+Онлайн — **PeerJS / WebRTC** (отдельный игровой сервер не нужен).
 
 ## Локальный запуск
 
 ```bash
 pnpm install
+unset VITE_BASE
 pnpm dev
 ```
 
-Откроется Vite на `http://localhost:5173`.
+Откройте `http://127.0.0.1:5173/`.
 
-```bash
-pnpm test
-pnpm build
-```
+## Деплой на GitHub Pages (важно)
 
-## Деплой на GitHub Pages
+Сайт собирается в ветку **`gh-pages`**. Один раз настройте Pages:
 
-1. Запушьте репозиторий на GitHub.
-2. **Settings → Pages → Build and deployment → Source: GitHub Actions**.
-3. Workflow [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml) соберёт клиент с `VITE_BASE=/<имя-репо>/` и задеплоит.
-4. Сайт: `https://<user>.github.io/<repo>/`.
+1. Репозиторий → **Settings → Pages**
+2. **Build and deployment → Source**: **Deploy from a branch**
+3. **Branch**: `gh-pages` / folder `/ (root)` → Save
 
-Локальная проверка сборки «как на Pages» (подставьте имя репо):
+После пуша в `main` workflow **Deploy GitHub Pages** соберёт клиент и обновит `gh-pages`.
 
-```bash
-VITE_BASE=/chessforge/ pnpm --filter @chessforge/client build
-pnpm --filter @chessforge/client preview
-```
+Адрес проекта:
 
-> Белый экран после деплоя почти всегда значит, что `base` не совпадает с путём репозитория (ассеты ищутся в `/assets/...` вместо `/repo/assets/...`).
+`https://<user>.github.io/<имя-репозитория>/`
 
-## Онлайн
+Для этого репо: **https://ShinokuS.github.io/chessforge.github.io/**
 
-На вкладке **Бой → Онлайн**:
-
-1. Выберите сохранённую полную колоду.
-2. **Создать комнату** — появится ссылка `?room=xxxxxx`.
-3. Соперник открывает ссылку (или вводит код) и жмёт **Войти**.
-
-Хост играет белыми и авторитетно применяет ходы; связь идёт через публичный брокер PeerJS + WebRTC.
+> Если открывается «документация» Jekyll / README вместо игры — Pages всё ещё смотрит на ветку `main`. Переключите source на `gh-pages`, как выше.
