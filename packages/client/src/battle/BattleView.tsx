@@ -93,8 +93,6 @@ export function BattleView() {
             }`
           : onlineStatus === 'connecting'
             ? 'Подключение…'
-            : onlineStatus === 'reconnecting'
-              ? 'Переподключение…'
             : onlineStatus === 'disconnected'
               ? 'Соединение потеряно'
               : 'Онлайн-лобби'
@@ -116,13 +114,11 @@ export function BattleView() {
     (battleMode === 'ai' && (aiPlaying || Boolean(endBanner) || state.phase === 'gameOver')) ||
     onlineStatus === 'waiting' ||
     onlineStatus === 'playing' ||
-    onlineStatus === 'reconnecting' ||
     (battleMode === 'online' && state.phase === 'gameOver');
 
   const showClocks =
     (battleMode === 'ai' && aiPlaying) ||
     onlineStatus === 'playing' ||
-    onlineStatus === 'reconnecting' ||
     Boolean(endBanner) ||
     (battleMode === 'online' && state.phase === 'gameOver');
 
@@ -221,7 +217,6 @@ export function BattleView() {
         {(aiPlaying ||
           onlineStatus === 'waiting' ||
           onlineStatus === 'playing' ||
-          onlineStatus === 'reconnecting' ||
           onlineStatus === 'connecting') && (
           <button type="button" className={styles.restart} onClick={restart}>
             {battleMode === 'online' ? 'Выйти / сброс' : 'В лобби'}
@@ -462,8 +457,8 @@ export function BattleView() {
 
       <p className={styles.hint}>
         {battleMode === 'online'
-          ? 'Создайте комнату (время и сторона — ваши) или войдите по коду со своей колодой.'
-          : aiPlaying
+                      ? 'Создайте комнату (время и сторона — ваши) или войдите по коду со своей колодой. Нужен запущенный WS-сервер.'
+                      : aiPlaying
             ? 'Выберите фигуру, затем клетку. Рокировка — король на два поля к ладье.'
             : 'Выберите колоду, силу ИИ и контроль времени, затем начните партию.'}
       </p>

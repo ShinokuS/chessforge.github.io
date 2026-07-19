@@ -12,9 +12,10 @@ import {
 } from '@chessforge/engine';
 import type { GameSessionListener } from './GameSession';
 import {
-  peerIdForRoom,
-  randomRoomCode,
+  resolveRelayUrl,
   type PeerMessage,
+  type WireClientMessage,
+  type WireServerMessage,
 } from '../online/protocol';
 import { validatePlacements } from '../online/validate';
 import { resolveSide, type SidePreference } from '../battle/settings';
@@ -25,7 +26,6 @@ export type OnlineStatus =
   | 'connecting'
   | 'waiting'
   | 'playing'
-  | 'reconnecting'
   | 'disconnected'
   | 'error';
 
@@ -34,41 +34,9 @@ export type CreateRoomOptions = {
   side: SidePreference;
 };
 
-type PeerCtor = new (...args: any[]) => PeerInstance;
-
-type PeerInstance = {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on(event: string, cb: (...args: any[]) => void): void;
-  connect(id: string, options?: { reliable?: boolean }): DataConn;
-  destroy(): void;
-};
-
-type DataConn = {
-  open: boolean;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  on(event: string, cb: (...args: any[]) => void): void;
-  send(data: unknown): void;
-  close(): void;
-};
-
-async function loadPeer(): Promise<PeerCtor> {
-  const mod = await import('peerjs');
-  if (typeof mod.Peer === 'function') return mod.Peer as unknown as PeerCtor;
-  const d = mod.default as unknown;
-  if (typeof d === 'function') return d as PeerCtor;
-  if (
-    d &&
-    typeof d === 'object' &&
-    typeof (d as { Peer?: PeerCtor }).Peer === 'function'
-  ) {
-    return (d as { Peer: PeerCtor }).Peer;
-  }
-  throw new Error('PeerJS не загрузился');
-}
-
 /**
- * P2P online session via PeerJS (default cloud ICE — most reliable for VPN).
- * Host is authoritative regardless of board color.
+ * Online session over a WebSocket room relay (VPN-friendly).
+ * Host browser remains authoritative for match state.
  */
 export class OnlineGameSession {
   private state: MatchState = createDemoMatch();
@@ -82,10 +50,10 @@ export class OnlineGameSession {
   private hostSide: SidePreference = 'white';
   private hostColor: PlayerId = 'white';
 
-  private peer: PeerInstance | null = null;
-  private conn: DataConn | null = null;
+  private ws: WebSocket | null = null;
   private hostPlacements: FormationPlacement[] | null = null;
   private isHost = false;
+  private peerReady = false;
 
   getState(): MatchState {
     return this.state;
@@ -153,38 +121,134 @@ export class OnlineGameSession {
     this.emit([]);
   }
 
-  private send(msg: PeerMessage): void {
-    if (!this.conn?.open) {
-      this.fail('Нет соединения с соперником');
+  private wireSend(msg: WireClientMessage): void {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.fail('Нет соединения с сервером');
       return;
     }
-    this.conn.send(msg);
+    this.ws.send(JSON.stringify(msg));
+  }
+
+  private send(msg: PeerMessage): void {
+    if (!this.peerReady && msg.type !== 'guestHello') {
+      // guestHello is sent right after ready; other msgs need peer
+    }
+    this.wireSend({ type: 'forward', data: msg });
   }
 
   private guestColor(): PlayerId {
     return this.myColor === 'white' ? 'black' : 'white';
   }
 
-  private bindConnection(conn: DataConn): void {
-    this.conn = conn;
-    conn.on('data', (raw: unknown) => {
-      this.onPeerMessage(raw as PeerMessage);
-    });
-    conn.on('close', () => {
-      if (this.status === 'playing' || this.status === 'waiting') {
-        this.lastError = 'Соперник отключился';
-        this.setStatus('disconnected');
-        this.emit([]);
+  private closeSocket(): void {
+    if (this.ws) {
+      try {
+        this.ws.onopen = null;
+        this.ws.onmessage = null;
+        this.ws.onerror = null;
+        this.ws.onclose = null;
+        this.ws.close();
+      } catch {
+        /* ignore */
       }
+    }
+    this.ws = null;
+    this.peerReady = false;
+  }
+
+  private connectSocket(): Promise<void> {
+    const url = resolveRelayUrl();
+    if (!url) {
+      return Promise.reject(
+        new Error(
+          'Онлайн-сервер не настроен. Для GitHub Pages задайте VITE_WS_URL=wss://…/ws',
+        ),
+      );
+    }
+
+    return new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      this.ws = ws;
+      const t = window.setTimeout(() => {
+        reject(new Error('Таймаут подключения к серверу'));
+        try {
+          ws.close();
+        } catch {
+          /* ignore */
+        }
+      }, 12_000);
+
+      ws.onopen = () => {
+        window.clearTimeout(t);
+        resolve();
+      };
+      ws.onerror = () => {
+        window.clearTimeout(t);
+        reject(new Error('Не удалось подключиться к серверу'));
+      };
+      ws.onmessage = (ev) => {
+        this.onWireMessage(ev.data);
+      };
+      ws.onclose = () => {
+        if (this.status === 'waiting' || this.status === 'playing' || this.status === 'connecting') {
+          this.lastError = 'Соединение с сервером потеряно';
+          this.setStatus('disconnected');
+          this.emit([]);
+        }
+      };
     });
-    conn.on('error', () => {
-      this.fail('Ошибка канала связи');
-    });
+  }
+
+  private onWireMessage(raw: unknown): void {
+    let msg: WireServerMessage;
+    try {
+      msg = JSON.parse(String(raw)) as WireServerMessage;
+    } catch {
+      return;
+    }
+
+    if (msg.type === 'error') {
+      this.lastError = msg.message;
+      this.setStatus('error');
+      this.emit([]);
+      return;
+    }
+
+    if (msg.type === 'created') {
+      this.roomId = msg.roomId;
+      return;
+    }
+
+    if (msg.type === 'joined') {
+      this.roomId = msg.roomId;
+      return;
+    }
+
+    if (msg.type === 'ready') {
+      this.peerReady = true;
+      this.lastError = null;
+      if (this.isHost) {
+        // stay waiting until guestHello → matchStart
+        this.emitStatus();
+      }
+      return;
+    }
+
+    if (msg.type === 'peerLeft') {
+      this.peerReady = false;
+      this.lastError = 'Соперник отключился';
+      this.setStatus('disconnected');
+      this.emit([]);
+      return;
+    }
+
+    if (msg.type === 'forward') {
+      this.onPeerMessage(msg.data);
+    }
   }
 
   private onPeerMessage(msg: PeerMessage): void {
     if (msg.type === 'ping' || msg.type === 'pong' || msg.type === 'guestRejoin' || msg.type === 'resync') {
-      // Legacy/ignored — kept for protocol compat with older tabs
       return;
     }
 
@@ -278,21 +342,6 @@ export class OnlineGameSession {
     }
   }
 
-  private destroyPeer(): void {
-    try {
-      this.conn?.close();
-    } catch {
-      /* ignore */
-    }
-    try {
-      this.peer?.destroy();
-    } catch {
-      /* ignore */
-    }
-    this.conn = null;
-    this.peer = null;
-  }
-
   async createRoom(
     placements: FormationPlacement[],
     options: CreateRoomOptions,
@@ -312,73 +361,52 @@ export class OnlineGameSession {
     this.myColor = this.hostColor;
     this.setStatus('connecting');
 
-    let Peer: PeerCtor;
     try {
-      Peer = await loadPeer();
+      await this.connectSocket();
     } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
+      this.fail(e instanceof Error ? e.message : 'Не удалось подключиться');
       return;
     }
 
-    let lastError: unknown;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const roomId = randomRoomCode();
-      // Default PeerJS options only — custom TURN/heartbeat made VPN worse
-      const peer = new Peer(peerIdForRoom(roomId), { debug: 0 });
-      this.peer = peer;
+    this.wireSend({ type: 'create' });
 
-      try {
-        await new Promise<void>((resolve, reject) => {
-          peer.on('open', () => resolve());
-          peer.on('error', (e) => reject(e));
-        });
-
-        this.roomId = roomId;
-        const previewWhite =
-          this.hostColor === 'black' ? classicBasePlacements() : placements;
-        const previewBlack =
-          this.hostColor === 'black' ? placements : classicBasePlacements();
-        this.state = createMatchFromPlacements(
-          previewWhite,
-          previewBlack,
-          (Date.now() >>> 0) || 1,
-        );
-        this.setStatus('waiting');
-        this.lastError = null;
-        this.emit([]);
-
-        peer.on('connection', (conn) => {
-          if (this.conn?.open) {
-            conn.close();
-            return;
-          }
-          this.bindConnection(conn);
-        });
-
-        peer.on('disconnected', () => {
-          if (this.status === 'waiting' || this.status === 'playing') {
-            this.lastError = 'Потеряно соединение с сетью PeerJS';
-            this.setStatus('disconnected');
-            this.emit([]);
-          }
-        });
-        return;
-      } catch (e) {
-        lastError = e;
-        try {
-          peer.destroy();
-        } catch {
-          /* ignore */
-        }
-        this.peer = null;
-      }
+    // Wait until server assigns roomId
+    const roomId = await this.waitForRoomId(8_000);
+    if (!roomId) {
+      this.fail('Сервер не выдал код комнаты');
+      return;
     }
 
-    this.fail(
-      lastError instanceof Error
-        ? lastError.message
-        : 'Не удалось создать комнату. Попробуйте ещё раз.',
+    const previewWhite =
+      this.hostColor === 'black' ? classicBasePlacements() : placements;
+    const previewBlack =
+      this.hostColor === 'black' ? placements : classicBasePlacements();
+    this.state = createMatchFromPlacements(
+      previewWhite,
+      previewBlack,
+      (Date.now() >>> 0) || 1,
     );
+    this.setStatus('waiting');
+    this.lastError = null;
+    this.emit([]);
+  }
+
+  private waitForRoomId(ms: number): Promise<string | null> {
+    if (this.roomId) return Promise.resolve(this.roomId);
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const id = window.setInterval(() => {
+        if (this.roomId) {
+          window.clearInterval(id);
+          resolve(this.roomId);
+          return;
+        }
+        if (Date.now() - start > ms || this.status === 'error') {
+          window.clearInterval(id);
+          resolve(null);
+        }
+      }, 50);
+    });
   }
 
   async joinRoom(roomId: string, placements: FormationPlacement[]): Promise<void> {
@@ -398,53 +426,47 @@ export class OnlineGameSession {
     this.isHost = false;
     this.hostPlacements = null;
     this.myColor = null;
-    this.roomId = code;
+    this.roomId = null;
     this.setStatus('connecting');
 
-    let Peer: PeerCtor;
     try {
-      Peer = await loadPeer();
-    } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
-      return;
-    }
-
-    const peer = new Peer({ debug: 0 });
-    this.peer = peer;
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        peer.on('open', () => resolve());
-        peer.on('error', (e) => reject(e));
-      });
+      await this.connectSocket();
     } catch (e) {
       this.fail(e instanceof Error ? e.message : 'Не удалось подключиться');
       return;
     }
 
-    const conn = peer.connect(peerIdForRoom(code), { reliable: true });
-    this.bindConnection(conn);
+    this.wireSend({ type: 'join', roomId: code });
 
-    try {
-      await new Promise<void>((resolve, reject) => {
-        const t = setTimeout(() => {
-          reject(new Error('Комната не отвечает. Проверьте код и что хост ещё ждёт.'));
-        }, 15_000);
-        conn.on('open', () => {
-          clearTimeout(t);
-          resolve();
-        });
-        conn.on('error', (e) => {
-          clearTimeout(t);
-          reject(e);
-        });
-      });
-    } catch (e) {
-      this.fail(e instanceof Error ? e.message : 'Не удалось войти в комнату');
+    const ready = await this.waitUntil(
+      () => this.peerReady || this.status === 'error',
+      15_000,
+    );
+    if (this.status === 'error') return;
+    if (!ready) {
+      this.fail('Комната не отвечает. Проверьте код и что хост ещё ждёт.');
       return;
     }
 
     this.send({ type: 'guestHello', placements });
+  }
+
+  private waitUntil(pred: () => boolean, ms: number): Promise<boolean> {
+    if (pred()) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const id = window.setInterval(() => {
+        if (pred()) {
+          window.clearInterval(id);
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start > ms) {
+          window.clearInterval(id);
+          resolve(false);
+        }
+      }, 50);
+    });
   }
 
   submitCommand(command: GameCommand): boolean {
@@ -485,14 +507,19 @@ export class OnlineGameSession {
   }
 
   disconnect(): void {
-    if (this.conn?.open) {
+    if (this.ws?.readyState === WebSocket.OPEN && this.peerReady) {
       try {
-        this.conn.send({ type: 'opponentLeft' } satisfies PeerMessage);
+        this.ws.send(
+          JSON.stringify({
+            type: 'forward',
+            data: { type: 'opponentLeft' } satisfies PeerMessage,
+          } satisfies WireClientMessage),
+        );
       } catch {
         /* ignore */
       }
     }
-    this.destroyPeer();
+    this.closeSocket();
     this.roomId = null;
     this.myColor = null;
     this.hostPlacements = null;

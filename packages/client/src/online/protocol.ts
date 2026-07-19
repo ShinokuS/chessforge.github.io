@@ -1,11 +1,6 @@
-import type {
-  FormationPlacement,
-  GameCommand,
-  MatchState,
-  PlayerId,
-} from '@chessforge/engine';
+import type { FormationPlacement, GameCommand, MatchState, PlayerId } from '@chessforge/engine';
 
-/** Messages over PeerJS data connection (host is authoritative regardless of color). */
+/** Game-level messages forwarded through the WS relay (host authoritative). */
 export type PeerMessage =
   | { type: 'guestHello'; placements: FormationPlacement[] }
   | { type: 'guestRejoin' }
@@ -32,9 +27,20 @@ export type PeerMessage =
   | { type: 'error'; message: string }
   | { type: 'opponentLeft' };
 
-export function peerIdForRoom(roomId: string): string {
-  return `chessforge-${roomId.toLowerCase()}`;
-}
+/** Client → relay */
+export type WireClientMessage =
+  | { type: 'create' }
+  | { type: 'join'; roomId: string }
+  | { type: 'forward'; data: PeerMessage };
+
+/** Relay → client */
+export type WireServerMessage =
+  | { type: 'created'; roomId: string }
+  | { type: 'joined'; roomId: string }
+  | { type: 'ready' }
+  | { type: 'forward'; data: PeerMessage }
+  | { type: 'peerLeft' }
+  | { type: 'error'; message: string };
 
 export function randomRoomCode(): string {
   const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -43,4 +49,17 @@ export function randomRoomCode(): string {
     out += alphabet[Math.floor(Math.random() * alphabet.length)]!;
   }
   return out;
+}
+
+/** Resolve WebSocket URL for the room relay. */
+export function resolveRelayUrl(): string | null {
+  const fromEnv = (import.meta.env.VITE_WS_URL as string | undefined)?.trim();
+  if (fromEnv) return fromEnv;
+
+  if (import.meta.env.DEV) {
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${location.host}/ws`;
+  }
+
+  return null;
 }

@@ -9,7 +9,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@chessforge/engine": "workspace:*",
     "ws": "^8.18.3"
   },
   "devDependencies": {

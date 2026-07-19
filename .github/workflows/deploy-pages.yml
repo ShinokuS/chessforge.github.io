@@ -35,6 +35,8 @@ jobs:
         env:
           # Project site: https://<user>.github.io/<repo>/
           VITE_BASE: /${{ github.event.repository.name }}/
+          # Optional: wss://your-relay.example.com/ws (repo Actions variable)
+          VITE_WS_URL: ${{ vars.VITE_WS_URL }}
         run: pnpm --filter @chessforge/client build
 
       - name: SPA fallback + disable Jekyll
