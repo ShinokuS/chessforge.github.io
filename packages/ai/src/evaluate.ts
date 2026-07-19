@@ -7,15 +7,15 @@ import {
   type MatchState,
   type PieceInstance,
   type PlayerId,
-} from '@chessforge/engine';
+} from "@chessforge/engine";
 import {
   ROLE_VALUE,
   featureModBonus,
   unusedAbilityValue,
-} from './heuristics.js';
+} from "./heuristics.js";
 
 function opposite(p: PlayerId): PlayerId {
-  return p === 'white' ? 'black' : 'white';
+  return p === "white" ? "black" : "white";
 }
 
 function isKing(piece: PieceInstance): boolean {
@@ -25,12 +25,11 @@ function isKing(piece: PieceInstance): boolean {
 function pieceMaterial(piece: PieceInstance): number {
   const def = getPieceDefinition(piece.defId);
   // Kings cancel when both alive; game-over handles missing kings.
-  if (def.baseRole === 'king') return 0;
+  if (def.baseRole === "king") return 0;
   const base = ROLE_VALUE[def.baseRole];
   const mod = featureModBonus(def);
   // Low HP is more than linear loss (easier to finish).
-  const hpFactor =
-    def.maxHp > 0 ? 0.35 + 0.65 * (piece.hp / def.maxHp) : 1;
+  const hpFactor = def.maxHp > 0 ? 0.35 + 0.65 * (piece.hp / def.maxHp) : 1;
   return (base + mod) * hpFactor;
 }
 
@@ -39,7 +38,8 @@ function statusTerms(piece: PieceInstance, perspective: PlayerId): number {
   let score = 0;
   const frozen = piece.frozenTurns ?? 0;
   if (frozen > 0) {
-    const v = Math.min(280, 40 + pieceTacticalValue(piece.defId) * 0.28) * frozen;
+    const v =
+      Math.min(280, 40 + pieceTacticalValue(piece.defId) * 0.28) * frozen;
     score += mine ? -v : v;
   }
   const shield = piece.shieldTurns ?? 0;
@@ -59,7 +59,11 @@ function statusTerms(piece: PieceInstance, perspective: PlayerId): number {
 }
 
 /** Tile scoring from definition flags — any new tile with these flags is understood. */
-function tileTerms(piece: PieceInstance, perspective: PlayerId, state: MatchState): number {
+function tileTerms(
+  piece: PieceInstance,
+  perspective: PlayerId,
+  state: MatchState,
+): number {
   const tile = getTileDef(state.board, piece.pos);
   if (!tile) return 0;
   const mine = piece.owner === perspective;
@@ -89,7 +93,10 @@ function tileTerms(piece: PieceInstance, perspective: PlayerId, state: MatchStat
 /**
  * Squares `side` can capture onto. Includes freeze-"captures".
  */
-function captureTargets(state: MatchState, side: PlayerId): Map<string, number> {
+function captureTargets(
+  state: MatchState,
+  side: PlayerId,
+): Map<string, number> {
   const probe: MatchState = {
     ...state,
     activePlayer: side,
@@ -110,7 +117,10 @@ function captureTargets(state: MatchState, side: PlayerId): Map<string, number> 
  * Lethal captures only (HP damage that would remove the piece). Freeze ≠ kill.
  * This is what matters for king-mate threats in Chessforge.
  */
-function lethalCaptureTargets(state: MatchState, side: PlayerId): Map<string, number> {
+function lethalCaptureTargets(
+  state: MatchState,
+  side: PlayerId,
+): Map<string, number> {
   const probe: MatchState = {
     ...state,
     activePlayer: side,
@@ -184,7 +194,13 @@ function kingSafetyTerms(state: MatchState, perspective: PlayerId): number {
           if (dx === 0 && dy === 0) continue;
           const x = myKing.pos.x + dx;
           const y = myKing.pos.y + dy;
-          if (x < 0 || y < 0 || x >= state.board.width || y >= state.board.height) continue;
+          if (
+            x < 0 ||
+            y < 0 ||
+            x >= state.board.width ||
+            y >= state.board.height
+          )
+            continue;
           if (lethalByOpp.has(`${x},${y}`)) covered += 1;
         }
       }
@@ -249,7 +265,7 @@ function hangingTerms(state: MatchState, perspective: PlayerId): number {
  * Scale ≈ centipawns (pawn = 100). Feature-driven — no piece/tile id tables.
  */
 export function evaluate(state: MatchState, perspective: PlayerId): number {
-  if (state.phase === 'gameOver') {
+  if (state.phase === "gameOver") {
     if (state.winner === perspective) return 1_000_000;
     if (state.winner && state.winner !== perspective) return -1_000_000;
     return 0;
@@ -291,13 +307,14 @@ export function evaluate(state: MatchState, perspective: PlayerId): number {
   for (const piece of state.pieces) {
     if (piece.owner !== perspective) continue;
     const def = getPieceDefinition(piece.defId);
-    if (!def.freezeInsteadOfCapture || (piece.freezeCooldown ?? 0) > 0) continue;
+    if (!def.freezeInsteadOfCapture || (piece.freezeCooldown ?? 0) > 0)
+      continue;
     const range = def.freezeRange ?? 3;
     for (const enemy of state.pieces) {
       if (enemy.owner === perspective) continue;
       if ((enemy.shieldTurns ?? 0) > 0) continue;
       const enemyDef = getPieceDefinition(enemy.defId);
-      if (enemyDef.baseRole === 'king') continue;
+      if (enemyDef.baseRole === "king") continue;
       const dist = Math.max(
         Math.abs(enemy.pos.x - piece.pos.x),
         Math.abs(enemy.pos.y - piece.pos.y),
@@ -317,6 +334,6 @@ export function evaluate(state: MatchState, perspective: PlayerId): number {
 
 export function pieceTacticalValue(defId: string): number {
   const def = getPieceDefinition(defId);
-  if (def.baseRole === 'king') return 900; // tactical compare only; not material
+  if (def.baseRole === "king") return 900; // tactical compare only; not material
   return ROLE_VALUE[def.baseRole] + featureModBonus(def);
 }
