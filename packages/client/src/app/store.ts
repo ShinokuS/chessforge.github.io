@@ -56,8 +56,13 @@ function isPlyEntry(e: MoveHistoryEntry): boolean {
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
-  session.subscribe(({ state, events, lastError }) => {
-    if (get().battleMode !== 'ai') return;
+  const appendEvents = (
+    mode: BattleMode,
+    state: MatchState,
+    events: GameEvent[],
+    lastError: string | null,
+  ) => {
+    if (get().battleMode !== mode) return;
     if (events.length === 0) {
       set({ state, events, lastError });
       return;
@@ -71,22 +76,15 @@ export const useAppStore = create<AppStore>((set, get) => {
       lastError,
       moveHistory: appended.length ? [...moveHistory, ...appended] : moveHistory,
     });
-  });
+  };
 
-  online.subscribe(({ state, events, lastError }) => {
-    if (get().battleMode !== 'online') return;
-    if (events.length === 0) {
-      set({ state, events, lastError });
-      return;
-    }
-    const { moveHistory } = get();
-    const realPlyCount = moveHistory.filter(isPlyEntry).length;
-    const appended = formatEventsToHistory(events, state, realPlyCount + 1);
-    set({
-      state,
-      events,
-      lastError,
-      moveHistory: appended.length ? [...moveHistory, ...appended] : moveHistory,
+  // Subscribe after store exists (avoid get() during initializer)
+  queueMicrotask(() => {
+    session.subscribe(({ state, events, lastError }) => {
+      appendEvents('ai', state, events, lastError);
+    });
+    online.subscribe(({ state, events, lastError }) => {
+      appendEvents('online', state, events, lastError);
     });
   });
 

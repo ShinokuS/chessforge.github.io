@@ -5,24 +5,27 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 
-/** GitHub Pages project site needs `/repo-name/`; local/preview uses `/`. */
-const base = process.env.VITE_BASE || '/';
+export default defineConfig(({ command }) => {
+  // Dev must always be `/`. VITE_BASE is only for `vite build` (GitHub Pages).
+  const base = command === 'serve' ? '/' : process.env.VITE_BASE || '/';
 
-export default defineConfig({
-  base,
-  plugins: [react()],
-  resolve: {
-    alias: {
-      '@chessforge/engine': path.resolve(root, '../engine/src/index.ts'),
-      '@chessforge/ai': path.resolve(root, '../ai/src/index.ts'),
+  return {
+    base,
+    plugins: [react()],
+    resolve: {
+      alias: {
+        '@chessforge/engine': path.resolve(root, '../engine/src/index.ts'),
+        '@chessforge/ai': path.resolve(root, '../ai/src/index.ts'),
+      },
     },
-  },
-  server: {
-    host: true,
-    port: 5173,
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-  },
+    server: {
+      host: '127.0.0.1',
+      port: 5173,
+      strictPort: true,
+    },
+    build: {
+      outDir: 'dist',
+      sourcemap: true,
+    },
+  };
 });

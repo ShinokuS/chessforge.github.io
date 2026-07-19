@@ -1,4 +1,4 @@
-import Peer, { type DataConnection } from 'peerjs';
+import type { DataConnection } from 'peerjs';
 import {
   applyCommand,
   createDemoMatch,
@@ -27,9 +27,28 @@ export type OnlineStatus =
   | 'disconnected'
   | 'error';
 
+type PeerCtor = typeof import('peerjs').Peer;
+type PeerInstance = InstanceType<PeerCtor>;
+
+async function loadPeer(): Promise<PeerCtor> {
+  const mod = await import('peerjs');
+  if (typeof mod.Peer === 'function') return mod.Peer;
+  const d = mod.default as unknown;
+  if (typeof d === 'function') return d as PeerCtor;
+  if (
+    d &&
+    typeof d === 'object' &&
+    typeof (d as { Peer?: PeerCtor }).Peer === 'function'
+  ) {
+    return (d as { Peer: PeerCtor }).Peer;
+  }
+  throw new Error('PeerJS не загрузился');
+}
+
 /**
  * P2P online session via PeerJS (works on GitHub Pages — no game server).
  * Host (white) is authoritative for match state and command validation.
+ * PeerJS is lazy-loaded so the main app boots without it.
  */
 export class OnlineGameSession {
   private state: MatchState = createDemoMatch();
@@ -40,7 +59,7 @@ export class OnlineGameSession {
   private myColor: PlayerId | null = null;
   private statusListeners = new Set<() => void>();
 
-  private peer: Peer | null = null;
+  private peer: PeerInstance | null = null;
   private conn: DataConnection | null = null;
   private hostPlacements: FormationPlacement[] | null = null;
   private isHost = false;
@@ -190,9 +209,8 @@ export class OnlineGameSession {
     }
 
     if (msg.type === 'command') {
-      // Guest applies host-confirmed commands; host already applied own moves.
       if (this.isHost && msg.by === 'white') return;
-      if (this.isHost && msg.by === 'black') return; // already applied above
+      if (this.isHost && msg.by === 'black') return;
       const result = applyCommand(this.state, msg.command);
       if (!result.ok) {
         this.lastError = result.message;
@@ -239,6 +257,14 @@ export class OnlineGameSession {
     this.hostPlacements = placements;
     this.myColor = 'white';
     this.setStatus('connecting');
+
+    let Peer: PeerCtor;
+    try {
+      Peer = await loadPeer();
+    } catch (e) {
+      this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
+      return;
+    }
 
     let lastError: unknown;
     for (let attempt = 0; attempt < 6; attempt++) {
@@ -311,35 +337,48 @@ export class OnlineGameSession {
     this.roomId = code;
     this.setStatus('connecting');
 
+    let Peer: PeerCtor;
+    try {
+      Peer = await loadPeer();
+    } catch (e) {
+      this.fail(e instanceof Error ? e.message : 'Не удалось загрузить PeerJS');
+      return;
+    }
+
     const peer = new Peer({ debug: 0 });
     this.peer = peer;
 
-    await new Promise<void>((resolve, reject) => {
-      peer.on('open', () => resolve());
-      peer.on('error', (e) => {
-        this.fail(e.message || 'Не удалось подключиться');
-        reject(e);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        peer.on('open', () => resolve());
+        peer.on('error', (e) => reject(e));
       });
-    });
+    } catch (e) {
+      this.fail(e instanceof Error ? e.message : 'Не удалось подключиться');
+      return;
+    }
 
     const conn = peer.connect(peerIdForRoom(code), { reliable: true });
     this.bindConnection(conn);
 
-    await new Promise<void>((resolve, reject) => {
-      const t = setTimeout(() => {
-        this.fail('Комната не отвечает. Проверьте код и что хост ещё ждёт.');
-        reject(new Error('timeout'));
-      }, 15_000);
-      conn.on('open', () => {
-        clearTimeout(t);
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(() => {
+          reject(new Error('Комната не отвечает. Проверьте код и что хост ещё ждёт.'));
+        }, 15_000);
+        conn.on('open', () => {
+          clearTimeout(t);
+          resolve();
+        });
+        conn.on('error', (e) => {
+          clearTimeout(t);
+          reject(e);
+        });
       });
-      conn.on('error', (e) => {
-        clearTimeout(t);
-        this.fail('Не удалось войти в комнату');
-        reject(e);
-      });
-    });
+    } catch (e) {
+      this.fail(e instanceof Error ? e.message : 'Не удалось войти в комнату');
+      return;
+    }
 
     this.send({ type: 'guestHello', placements });
   }
