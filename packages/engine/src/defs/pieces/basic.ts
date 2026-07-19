@@ -99,7 +99,7 @@ export const ironcladDef: PieceDefinition = {
   baseRole: 'pawn',
   isBase: false,
   description:
-    'Модификация пешки: классическое движение, но 2 HP — чтобы убить, нужно дважды атаковать.',
+    'Модификация пешки: классическое движение, но 2 HP — чтобы убить, нужно дважды атаковать. Удар по HP не сдвигает атакующего: в истории ходов видно «кто бьёт кого», на доске подсвечиваются клетки удара.',
   cost: 2,
   rarity: 'uncommon',
   maxHp: 2,
@@ -108,6 +108,33 @@ export const ironcladDef: PieceDefinition = {
   captureOffsets: [
     { x: -1, y: 1 },
     { x: 1, y: 1 },
+  ],
+  movement: [
+    { kind: 'leap', offsets: [{ x: 0, y: 1 }] },
+    {
+      kind: 'conditional',
+      when: 'neverMoved',
+      patterns: [{ kind: 'leap', offsets: [{ x: 0, y: 2 }] }],
+    },
+  ],
+};
+
+/** Ходит как пешка; бьёт только прямо вперёд на 2. */
+export const spearmanDef: PieceDefinition = {
+  id: 'spearman',
+  name: 'Копейщик',
+  baseRole: 'pawn',
+  isBase: false,
+  description:
+    'Модификация пешки: ходит как обычная пешка (вперёд 1, со старта 2). Атакует только прямо вперёд на 1 или 2 клетки — диагональных взятий нет.',
+  cost: 2,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  splitCapture: true,
+  captureOffsets: [
+    { x: 0, y: 1 },
+    { x: 0, y: 2 },
   ],
   movement: [
     { kind: 'leap', offsets: [{ x: 0, y: 1 }] },
@@ -150,6 +177,21 @@ export const sprinterDef: PieceDefinition = {
       description: 'Один раз: прыжок через соседнего союзника на пустую клетку за ним.',
     },
   ],
+};
+
+/** Ходит на 1 как король; освобождает бюджет колоды. */
+export const sentryDef: PieceDefinition = {
+  id: 'sentry',
+  name: 'Часовой',
+  baseRole: 'rook',
+  isBase: false,
+  description:
+    'Модификация ладьи: ходит и бьёт только на 1 клетку в любом направлении (как король). Даёт −2 к стоимости колоды.',
+  cost: -2,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'leap', offsets: ALL_DIRS }],
 };
 
 export const knightDef: PieceDefinition = {
@@ -239,6 +281,28 @@ export const chaplainDef: PieceDefinition = {
   lineBuff: { directions: DIAG, maxRange: 8 },
 };
 
+/** Раз за матч обмен с союзником на диагонали атаки. */
+export const exchangerDef: PieceDefinition = {
+  id: 'exchanger',
+  name: 'Сменщик',
+  baseRole: 'bishop',
+  isBase: false,
+  description:
+    'Модификация слона: ходит и бьёт по диагонали как обычный слон. Один раз за матч может поменяться местами с союзной фигурой, которая стоит на его диагональном луче атаки (первая фигура на луче, если это союзник).',
+  cost: 2,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'slide', directions: DIAG, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'allySwap',
+      description:
+        'Один раз: обмен позициями с союзником на диагональном луче (луч блокируется любой фигурой).',
+    },
+  ],
+};
+
 export const queenDef: PieceDefinition = {
   id: 'queen',
   name: 'Ферзь',
@@ -271,6 +335,26 @@ export const regentDef: PieceDefinition = {
       description: 'Один раз: телепорт на пустую клетку рядом с королём.',
     },
   ],
+};
+
+/**
+ * Не ест фигуры: «взятие» замораживает цель на 1 ход.
+ * Сама чародейка после заморозки 2 хода не может замораживать снова.
+ */
+export const cryomancerDef: PieceDefinition = {
+  id: 'cryomancer',
+  name: 'Чародейка',
+  baseRole: 'queen',
+  isBase: false,
+  description:
+    'Модификация ферзя: ходит по любым лучам как ферзь, но не наносит урон и не съедает фигуры. Вместо взятия замораживает врага на 1 его ход (фигура с ледяной подсветкой не может ходить). После заморозки сама Чародейка 2 своих хода не может замораживать снова. Сама при этом остаётся на месте.',
+  cost: 5,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 0,
+  freezeInsteadOfCapture: true,
+  freezeCooldownTurns: 2,
+  movement: [{ kind: 'slide', directions: ALL_DIRS, maxRange: 8 }],
 };
 
 export const kingDef: PieceDefinition = {
@@ -323,15 +407,19 @@ export const PIECE_DEFS = [
   pawnDef,
   skirmisherDef,
   ironcladDef,
+  spearmanDef,
   rookDef,
   sprinterDef,
+  sentryDef,
   knightDef,
   lancerDef,
   outriderDef,
   bishopDef,
   chaplainDef,
+  exchangerDef,
   queenDef,
   regentDef,
+  cryomancerDef,
   kingDef,
   wardenDef,
   anchorDef,

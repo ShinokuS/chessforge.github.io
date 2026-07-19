@@ -58,19 +58,22 @@ function expandPattern(
 function buildCells(def: PieceDefinition): Map<string, CellKind> {
   const quiet = new Set<string>();
   const capture = new Set<string>();
+  const quietOnly = Boolean(def.cannotCapture);
 
   if (def.splitCapture && def.captureOffsets) {
     for (const pattern of def.movement) {
       expandPattern(pattern, quiet, capture, 'quiet');
     }
-    for (const off of def.captureOffsets) {
-      const x = ORIGIN + off.x;
-      const y = ORIGIN + off.y;
-      if (inBoard(x, y)) capture.add(key(x, y));
+    if (!quietOnly) {
+      for (const off of def.captureOffsets) {
+        const x = ORIGIN + off.x;
+        const y = ORIGIN + off.y;
+        if (inBoard(x, y)) capture.add(key(x, y));
+      }
     }
   } else {
     for (const pattern of def.movement) {
-      expandPattern(pattern, quiet, capture, 'both');
+      expandPattern(pattern, quiet, capture, quietOnly ? 'quiet' : 'both');
     }
   }
 

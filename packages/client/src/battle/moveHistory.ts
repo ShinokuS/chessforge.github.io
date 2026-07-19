@@ -12,14 +12,18 @@ function sq(c: Coord): string {
   return `${String.fromCharCode(97 + c.x)}${c.y + 1}`;
 }
 
+function defName(defId: string): string {
+  try {
+    return getPieceDefinition(defId).name;
+  } catch {
+    return defId;
+  }
+}
+
 function pieceName(state: MatchState, pieceId: string): string {
   const p = state.pieces.find((x) => x.id === pieceId);
   if (!p) return 'фигура';
-  try {
-    return getPieceDefinition(p.defId).name;
-  } catch {
-    return p.defId;
-  }
+  return defName(p.defId);
 }
 
 function ownerOf(state: MatchState, pieceId: string, fallbackPly: number): 'white' | 'black' {
@@ -37,6 +41,9 @@ export function formatEventsToHistory(
   const entries: MoveHistoryEntry[] = [];
   let ply = nextPly;
   const notes: string[] = [];
+  let pendingStrike: Extract<GameEvent, { type: 'Damaged' }> | null = null;
+  let pendingFreeze: Extract<GameEvent, { type: 'Frozen' }> | null = null;
+  let pendingCapture: Extract<GameEvent, { type: 'Captured' }> | null = null;
 
   const pushMove = (player: 'white' | 'black', text: string) => {
     const extra = notes.length ? ` · ${notes.join(' · ')}` : '';
@@ -52,9 +59,11 @@ export function formatEventsToHistory(
 
   for (const e of events) {
     if (e.type === 'Captured') {
-      notes.push('взятие');
+      pendingCapture = e;
     } else if (e.type === 'Damaged') {
-      notes.push(`удар (${e.hpLeft} HP)`);
+      pendingStrike = e;
+    } else if (e.type === 'Frozen') {
+      pendingFreeze = e;
     } else if (e.type === 'Moved') {
       const ability =
         e.abilityId === 'retreat'
@@ -63,11 +72,25 @@ export function formatEventsToHistory(
             ? ' (телепорт)'
             : e.abilityId === 'allyLeap'
               ? ' (прыжок)'
-              : '';
+              : e.abilityId === 'allySwap'
+                ? ' (обмен)'
+                : '';
       const name = pieceName(stateAfter, e.pieceId);
+      let captureNote = '';
+      if (pendingCapture) {
+        captureNote = ` × ${defName(pendingCapture.defId)}`;
+        pendingCapture = null;
+      }
       pushMove(
         ownerOf(stateAfter, e.pieceId, ply),
-        `${name} ${sq(e.from)}→${sq(e.to)}${ability}`,
+        `${name} ${sq(e.from)}→${sq(e.to)}${ability}${captureNote}`,
+      );
+    } else if (e.type === 'Swapped') {
+      const name = pieceName(stateAfter, e.pieceId);
+      const other = pieceName(stateAfter, e.withPieceId);
+      pushMove(
+        ownerOf(stateAfter, e.pieceId, ply),
+        `${name} обмен с ${other} ${sq(e.from)}⇄${sq(e.to)}`,
       );
     } else if (e.type === 'Castled') {
       const side = e.side === 'kingside' ? '0-0' : '0-0-0';
@@ -93,6 +116,32 @@ export function formatEventsToHistory(
   }
 
   // Non-lethal strike: Damaged without Moved
+  if (pendingStrike) {
+    const atk = pieceName(stateAfter, pendingStrike.byPieceId);
+    const tgt = pieceName(stateAfter, pendingStrike.pieceId);
+    pushMove(
+      ownerOf(stateAfter, pendingStrike.byPieceId, ply),
+      `${atk} бьёт ${tgt} на ${sq(pendingStrike.at)} (${pendingStrike.hpLeft} HP)`,
+    );
+  }
+
+  if (pendingFreeze) {
+    const atk = pieceName(stateAfter, pendingFreeze.byPieceId);
+    const tgt = pieceName(stateAfter, pendingFreeze.pieceId);
+    pushMove(
+      ownerOf(stateAfter, pendingFreeze.byPieceId, ply),
+      `${atk} замораживает ${tgt} на ${sq(pendingFreeze.at)}`,
+    );
+  }
+
+  if (pendingCapture) {
+    const atk = pieceName(stateAfter, pendingCapture.byPieceId);
+    pushMove(
+      ownerOf(stateAfter, pendingCapture.byPieceId, ply),
+      `${atk} берёт ${defName(pendingCapture.defId)} на ${sq(pendingCapture.at)}`,
+    );
+  }
+
   if (notes.length) {
     pushMove(ply % 2 === 1 ? 'white' : 'black', notes.join(' · '));
   }

@@ -370,3 +370,93 @@ describe('anchor king', () => {
     expect(getLegalMoves(state, { x: 4, y: 0 })).toHaveLength(0);
   });
 });
+
+describe('cryomancer freeze', () => {
+  it('freezes instead of capturing and blocks target for a turn', () => {
+    const state = blankMatch([
+      createPieceInstance('cryomancer', 'white', { x: 0, y: 0 }, 'cq'),
+      createPieceInstance('pawn', 'black', { x: 0, y: 3 }, 'bp'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 3 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'cq')?.pos).toEqual({ x: 0, y: 0 });
+    expect(result.state.pieces.find((p) => p.id === 'bp')?.frozenTurns).toBe(1);
+    expect(result.state.pieces.find((p) => p.id === 'cq')?.freezeCooldown).toBeGreaterThan(0);
+    expect(result.events.some((e) => e.type === 'Frozen')).toBe(true);
+    expect(getLegalMoves(result.state, { x: 0, y: 3 })).toHaveLength(0);
+  });
+});
+
+describe('spearman', () => {
+  it('captures one or two squares straight ahead', () => {
+    const state = blankMatch([
+      createPieceInstance('spearman', 'white', { x: 3, y: 1 }, 'sp'),
+      createPieceInstance('pawn', 'black', { x: 3, y: 3 }, 'bp'),
+      createPieceInstance('pawn', 'black', { x: 4, y: 2 }, 'bd'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const moves = getLegalMoves(state, { x: 3, y: 1 });
+    expect(moves.some((m) => m.captures && m.to.x === 3 && m.to.y === 2)).toBe(false);
+    expect(moves.some((m) => m.captures && m.to.x === 3 && m.to.y === 3)).toBe(true);
+    expect(moves.some((m) => m.captures && m.to.x === 4 && m.to.y === 2)).toBe(false);
+
+    const stateNear = blankMatch([
+      createPieceInstance('spearman', 'white', { x: 3, y: 1 }, 'sp'),
+      createPieceInstance('pawn', 'black', { x: 3, y: 2 }, 'bp'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const near = getLegalMoves(stateNear, { x: 3, y: 1 });
+    expect(near.some((m) => m.captures && m.to.x === 3 && m.to.y === 2)).toBe(true);
+  });
+});
+
+describe('sentry rook', () => {
+  it('moves one step and has negative cost', () => {
+    expect(getPieceDefinition('sentry').cost).toBe(-2);
+    const state = blankMatch([
+      createPieceInstance('sentry', 'white', { x: 0, y: 0 }, 'sr'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const moves = getLegalMoves(state, { x: 0, y: 0 });
+    expect(
+      moves.every((m) => Math.max(Math.abs(m.to.x - 0), Math.abs(m.to.y - 0)) <= 1),
+    ).toBe(true);
+    expect(moves.some((m) => m.to.x === 0 && m.to.y === 2)).toBe(false);
+  });
+});
+
+describe('exchanger allySwap', () => {
+  it('swaps once with an ally on a diagonal ray', () => {
+    const state = blankMatch([
+      createPieceInstance('exchanger', 'white', { x: 2, y: 0 }, 'ex'),
+      createPieceInstance('pawn', 'white', { x: 4, y: 2 }, 'pw'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const moves = getLegalMoves(state, { x: 2, y: 0 });
+    expect(moves.some((m) => m.abilityId === 'allySwap' && m.to.x === 4 && m.to.y === 2)).toBe(
+      true,
+    );
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 2, y: 0 },
+      to: { x: 4, y: 2 },
+      abilityId: 'allySwap',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'ex')?.pos).toEqual({ x: 4, y: 2 });
+    expect(result.state.pieces.find((p) => p.id === 'pw')?.pos).toEqual({ x: 2, y: 0 });
+    expect(result.state.pieces.find((p) => p.id === 'ex')?.abilitiesUsed.allySwap).toBe(true);
+  });
+});

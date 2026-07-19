@@ -45,6 +45,12 @@ function lastMoveFromEvents(events: GameEvent[]): LastMoveHighlight | null {
     } else if (e.type === 'Castled') {
       from = e.kingFrom;
       to = e.kingTo;
+    } else if (e.type === 'Swapped') {
+      from = e.from;
+      to = e.to;
+    } else if (e.type === 'Damaged' || e.type === 'Frozen') {
+      from = e.from;
+      to = e.at;
     } else if (e.type === 'Teleported') {
       if (from) to = e.to;
       else {

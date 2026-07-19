@@ -70,6 +70,19 @@ function Ironclad({ owner }: { owner: PlayerId }) {
   );
 }
 
+/** Forward spear strike — long point. */
+function Spearman({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M22.5 5l1.8 14h-3.6z" fill={c.accent} stroke={c.stroke} />
+      <path d="M20 20h5v8l2 6H18l2-6z" />
+      <path d="M13 36h19v4H13z" />
+      <path d="M22.5 19v14" stroke={c.stroke} fill="none" strokeWidth={1.5} />
+    </Base>
+  );
+}
+
 function Rook({ owner }: { owner: PlayerId }) {
   return (
     <Base owner={owner}>
@@ -89,6 +102,19 @@ function Sprinter({ owner }: { owner: PlayerId }) {
       <path d="M13 32h19l-1.5 4H14.5z" />
       <path d="M12 38h21v3H12z" />
       <path d="M8 22h5M8 26h5M32 22h5M32 26h5" stroke={c.accent} fill="none" strokeWidth={1.8} strokeLinecap="round" />
+    </Base>
+  );
+}
+
+/** Compact king-step rook — low battlement. */
+function Sentry({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M15 18h4v-3h3v3h4v-3h3v3h4v5l-2 2v6H17v-6l-2-2z" />
+      <path d="M14 34h17l-1 3H15z" />
+      <path d="M13 39h19v3H13z" />
+      <circle cx="22.5" cy="26" r="2" fill={c.accent} stroke={c.stroke} />
     </Base>
   );
 }
@@ -158,6 +184,21 @@ function Chaplain({ owner }: { owner: PlayerId }) {
   );
 }
 
+/** Swap bishop — double mitre tips. */
+function Exchanger({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="18" cy="10" r="2" />
+      <circle cx="27" cy="10" r="2" />
+      <path d="M22.5 13.5c-4.8 3.2-8 8.2-8 13.2 0 2.2.6 4.1 1.6 5.8h12.8c1-1.7 1.6-3.6 1.6-5.8 0-5-3.2-10-8-13.2z" />
+      <path d="M16 24h13M19 21l-3 3 3 3M26 21l3 3-3 3" stroke={c.accent} fill="none" strokeWidth={1.6} strokeLinecap="round" />
+      <path d="M13 36.5h19l-1.6-4H14.6z" />
+      <path d="M11.5 39h22v3.5h-22z" />
+    </Base>
+  );
+}
+
 function Queen({ owner }: { owner: PlayerId }) {
   return (
     <Base owner={owner}>
@@ -181,6 +222,20 @@ function Regent({ owner }: { owner: PlayerId }) {
       <path d="M13 16 16 29h13l3-13-6 6-3.5-8L19 22z" />
       <path d="M14.5 31.5h16l-1.4 3.5h-13.2z" />
       <path d="M12 38.5h21v3.5H12z" />
+    </Base>
+  );
+}
+
+/** Freeze queen — icy crown points. */
+function Cryomancer({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M12 16l2.5-7 2.5 5 3-8 3 8 2.5-5 2.5 7" fill={c.accent} stroke={c.stroke} />
+      <path d="M13 17 16 29h13l3-12-5 5-3.5-7L20 22z" />
+      <path d="M14.5 31.5h16l-1.4 3.5h-13.2z" />
+      <path d="M12 38.5h21v3.5H12z" />
+      <path d="M18 24h9" stroke="#8fd4f0" fill="none" strokeWidth={1.5} />
     </Base>
   );
 }
@@ -226,15 +281,19 @@ const ICONS: Record<string, (props: { owner: PlayerId }) => ReactElement> = {
   pawn: Pawn,
   skirmisher: Skirmisher,
   ironclad: Ironclad,
+  spearman: Spearman,
   rook: Rook,
   sprinter: Sprinter,
+  sentry: Sentry,
   knight: Knight,
   lancer: Lancer,
   outrider: Outrider,
   bishop: Bishop,
   chaplain: Chaplain,
+  exchanger: Exchanger,
   queen: Queen,
   regent: Regent,
+  cryomancer: Cryomancer,
   king: King,
   warden: Warden,
   anchor: Anchor,

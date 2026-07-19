@@ -3,7 +3,7 @@ import type { Coord, PlayerId } from '../board/types.js';
 export type TileId = string;
 export type PieceDefId = string;
 export type PieceRole = 'king' | 'queen' | 'rook' | 'bishop' | 'knight' | 'pawn';
-export type AbilityId = 'retreat' | 'royalWarp' | 'allyLeap';
+export type AbilityId = 'retreat' | 'royalWarp' | 'allyLeap' | 'allySwap';
 
 export type TileDefinition = {
   id: TileId;
@@ -65,6 +65,13 @@ export type PieceDefinition = {
   splitCapture?: boolean;
   /** If true, piece never generates capture moves. */
   cannotCapture?: boolean;
+  /**
+   * Capture-like moves freeze the target instead of dealing damage.
+   * Attacker stays put; target skips its next turn; freezeCooldown applies.
+   */
+  freezeInsteadOfCapture?: boolean;
+  /** Own turns after a freeze before this piece can freeze again. */
+  freezeCooldownTurns?: number;
   /** If true, piece never generates legal moves (even from buffs / castling). */
   immobile?: boolean;
   /**
@@ -99,6 +106,10 @@ export type PieceInstance = {
    * 0 on enter → 1 on first return (grace, can leave) → 2 kills.
    */
   spikeTicks: number;
+  /** Remaining own turns this piece cannot move (freeze). */
+  frozenTurns: number;
+  /** Remaining own turns before freeze-capture is available again. */
+  freezeCooldown: number;
 };
 
 export type MatchPhase = 'play' | 'gameOver';

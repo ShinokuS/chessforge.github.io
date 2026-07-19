@@ -136,6 +136,12 @@ function applyEnterTile(
 
 function endTurn(state: MatchState, events: GameEvent[]): void {
   const previous = state.activePlayer;
+  // Tick freeze statuses for the player who just finished their turn
+  for (const p of state.pieces) {
+    if (p.owner !== previous) continue;
+    if ((p.frozenTurns ?? 0) > 0) p.frozenTurns -= 1;
+    if ((p.freezeCooldown ?? 0) > 0) p.freezeCooldown -= 1;
+  }
   const next = opponent(previous);
   state.activePlayer = next;
   if (next === 'white') {
@@ -242,32 +248,68 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       });
       applyEnterTile(next, piece, events);
       applyEnterTile(next, rook, events);
+    } else if (chosen.abilityId === 'allySwap' && chosen.targetPieceId) {
+      const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+      if (!target) {
+        return { ok: false, code: 'illegal', message: 'Swap target missing' };
+      }
+      const from = { ...piece.pos };
+      const to = { ...target.pos };
+      piece.pos = { ...to };
+      target.pos = { ...from };
+      piece.hasMoved = true;
+      events.push({
+        type: 'Swapped',
+        pieceId: piece.id,
+        withPieceId: target.id,
+        from,
+        to,
+      });
+      applyEnterTile(next, piece, events);
+      applyEnterTile(next, target, events);
     } else {
       let moved = true;
+      const moverDef = getPieceDefinition(piece.defId);
 
       if (chosen.captures && chosen.targetPieceId) {
         const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
         if (target) {
-          const atk = getPieceDefinition(piece.defId).attack;
-          target.hp -= atk;
-          if (target.hp <= 0) {
+          if (moverDef.freezeInsteadOfCapture) {
+            target.frozenTurns = Math.max(target.frozenTurns ?? 0, 1);
+            // +1: endTurn in this same command ticks the owner's cooldown once
+            piece.freezeCooldown = (moverDef.freezeCooldownTurns ?? 2) + 1;
             events.push({
-              type: 'Captured',
+              type: 'Frozen',
               pieceId: target.id,
               byPieceId: piece.id,
               at: { ...command.to },
+              from: { ...piece.pos },
             });
-            destroyPiece(next, target.id, events, 'capture');
-          } else {
-            events.push({
-              type: 'Damaged',
-              pieceId: target.id,
-              byPieceId: piece.id,
-              at: { ...command.to },
-              hpLeft: target.hp,
-            });
-            // Non-lethal strike: attacker stays put
             moved = false;
+          } else {
+            const atk = moverDef.attack;
+            target.hp -= atk;
+            if (target.hp <= 0) {
+              events.push({
+                type: 'Captured',
+                pieceId: target.id,
+                byPieceId: piece.id,
+                at: { ...command.to },
+                defId: target.defId,
+              });
+              destroyPiece(next, target.id, events, 'capture');
+            } else {
+              events.push({
+                type: 'Damaged',
+                pieceId: target.id,
+                byPieceId: piece.id,
+                at: { ...command.to },
+                from: { ...piece.pos },
+                hpLeft: target.hp,
+              });
+              // Non-lethal strike: attacker stays put
+              moved = false;
+            }
           }
         }
       }

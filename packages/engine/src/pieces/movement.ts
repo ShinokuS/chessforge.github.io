@@ -323,6 +323,35 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
         });
       }
     }
+
+    if (ability.id === 'allySwap') {
+      for (const pattern of def.movement) {
+        if (pattern.kind !== 'slide') continue;
+        const maxRange = resolveSlideRange(state, piece, pattern);
+        for (const dir of pattern.directions) {
+          for (let step = 1; step <= maxRange; step++) {
+            const to = {
+              x: piece.pos.x + dir.x * step,
+              y: piece.pos.y + dir.y * step,
+            };
+            if (!inBounds(to, state.board.width, state.board.height)) break;
+            if (!isPassable(state.board, to)) break;
+            const hit = pieceAt(state, to);
+            if (!hit) continue;
+            if (hit.owner === piece.owner && hit.id !== piece.id) {
+              out.push({
+                from: { ...piece.pos },
+                to: { ...hit.pos },
+                captures: false,
+                targetPieceId: hit.id,
+                abilityId: 'allySwap',
+              });
+            }
+            break;
+          }
+        }
+      }
+    }
   }
 }
 
@@ -344,14 +373,17 @@ export function getLegalMovesForPiece(
 ): LegalMove[] {
   if (state.phase !== 'play') return [];
   if (piece.owner !== state.activePlayer) return [];
+  if ((piece.frozenTurns ?? 0) > 0) return [];
 
   const def = getPieceDefinition(piece.defId);
   if (def.immobile) return [];
 
   const moves: LegalMove[] = [];
-  const captureMode = def.cannotCapture ? 'quiet' : 'both';
+  const freezeReady =
+    !def.freezeInsteadOfCapture || (piece.freezeCooldown ?? 0) <= 0;
+  const captureMode = def.cannotCapture || !freezeReady ? 'quiet' : 'both';
 
-  if (def.splitCapture && def.captureOffsets && !def.cannotCapture) {
+  if (def.splitCapture && def.captureOffsets && !def.cannotCapture && freezeReady) {
     for (const pattern of def.movement) {
       moves.push(...expandPattern(state, piece, pattern, 'quiet'));
     }

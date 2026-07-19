@@ -21,11 +21,15 @@ const ROLE_VALUE: Record<PieceRole, number> = {
 const MOD_BONUS: Record<string, number> = {
   skirmisher: 6,
   ironclad: 12,
+  spearman: 8,
   sprinter: 10,
+  sentry: -4,
   lancer: 5,
   outrider: 14,
   chaplain: 16,
+  exchanger: 12,
   regent: 22,
+  cryomancer: 18,
   warden: 20,
   anchor: -8,
 };
@@ -34,6 +38,7 @@ const ABILITY_VALUE: Record<string, number> = {
   retreat: 8,
   royalWarp: 12,
   allyLeap: 10,
+  allySwap: 14,
 };
 
 function pieceMaterial(piece: PieceInstance): number {

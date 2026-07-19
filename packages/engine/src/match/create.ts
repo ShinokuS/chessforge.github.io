@@ -32,6 +32,8 @@ export function createPieceInstance(
     abilitiesUsed: {},
     spikeArmed: false,
     spikeTicks: 0,
+    frozenTurns: 0,
+    freezeCooldown: 0,
   };
 }
 
@@ -42,6 +44,10 @@ export function createMatch(config: MatchConfig): MatchState {
       ...p,
       pos: { ...p.pos },
       abilitiesUsed: { ...p.abilitiesUsed },
+      frozenTurns: p.frozenTurns ?? 0,
+      freezeCooldown: p.freezeCooldown ?? 0,
+      spikeArmed: p.spikeArmed ?? false,
+      spikeTicks: p.spikeTicks ?? 0,
     })),
     activePlayer: config.activePlayer ?? 'white',
     turn: 1,

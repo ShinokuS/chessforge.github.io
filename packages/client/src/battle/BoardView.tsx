@@ -21,6 +21,7 @@ const ABILITY_LABEL: Record<string, string> = {
   retreat: 'Отступление',
   royalWarp: 'Телепорт к королю',
   allyLeap: 'Прыжок через союзника',
+  allySwap: 'Обмен с союзником',
 };
 
 export function BoardView() {
@@ -86,6 +87,7 @@ export function BoardView() {
       const move = legalMap.get(`${x},${y}`);
       const tileDef = getTileDefinition(tileId);
       const spiked = Boolean(piece?.spikeArmed);
+      const frozen = (piece?.frozenTurns ?? 0) > 0;
 
       const classNames = [
         styles.cell,
@@ -100,6 +102,7 @@ export function BoardView() {
         move && !move.captures ? styles.canMove : '',
         move?.captures ? styles.canCapture : '',
         spiked ? styles.spikeDoom : '',
+        frozen ? styles.freezeDoom : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -157,6 +160,14 @@ export function BoardView() {
                 {hoverPiece.spikeTicks >= 1
                   ? 'Если не уйдёт в этот ход — погибнет в начале следующего.'
                   : 'На шипах: есть ещё один свой ход, чтобы уйти.'}
+              </p>
+            )}
+            {(hoverPiece?.frozenTurns ?? 0) > 0 && (
+              <p className={styles.warn}>Заморожена: не может ходить в этот ход.</p>
+            )}
+            {hoverPiece && (hoverPiece.freezeCooldown ?? 0) > 0 && hoverDef?.freezeInsteadOfCapture && (
+              <p className={styles.warn}>
+                Перезарядка заморозки: ещё {hoverPiece.freezeCooldown} ход(а).
               </p>
             )}
             {hoverPiece && hoverDef && (

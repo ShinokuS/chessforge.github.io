@@ -17,8 +17,22 @@ export type GameEvent =
       rookFrom: Coord;
       rookTo: Coord;
     }
-  | { type: 'Damaged'; pieceId: string; byPieceId: string; at: Coord; hpLeft: number }
-  | { type: 'Captured'; pieceId: string; byPieceId: string; at: Coord }
+  | { type: 'Damaged'; pieceId: string; byPieceId: string; at: Coord; from: Coord; hpLeft: number }
+  | { type: 'Captured'; pieceId: string; byPieceId: string; at: Coord; defId: string }
+  | {
+      type: 'Frozen';
+      pieceId: string;
+      byPieceId: string;
+      at: Coord;
+      from: Coord;
+    }
+  | {
+      type: 'Swapped';
+      pieceId: string;
+      withPieceId: string;
+      from: Coord;
+      to: Coord;
+    }
   | { type: 'Teleported'; pieceId: string; from: Coord; to: Coord; tileId: string }
   | { type: 'TileTriggered'; tileId: string; pieceId: string; at: Coord; note: string }
   | { type: 'PieceDestroyed'; pieceId: string; at: Coord; reason?: string }

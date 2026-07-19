@@ -19,7 +19,11 @@ const MOD_PRIORITY: Record<string, number> = {
   warden: 80,
   sprinter: 75,
   skirmisher: 70,
+  exchanger: 68,
+  spearman: 65,
   lancer: 60,
+  cryomancer: 58,
+  sentry: 56,
   anchor: 55,
 };
 
