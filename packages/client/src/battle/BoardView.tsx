@@ -28,9 +28,10 @@ const ABILITY_LABEL: Record<string, string> = {
 };
 
 export function BoardView() {
-  const state = useAppStore((s) => s.state);
+  const liveState = useAppStore((s) => s.state);
+  const analysis = useAppStore((s) => s.analysis);
   const selected = useAppStore((s) => s.selected);
-  const lastMove = useAppStore((s) => s.lastMove);
+  const liveLastMove = useAppStore((s) => s.lastMove);
   const setSelected = useAppStore((s) => s.setSelected);
   const submitMove = useAppStore((s) => s.submitMove);
   const session = useAppStore((s) => s.session);
@@ -40,15 +41,29 @@ export function BoardView() {
   const endBanner = useAppStore((s) => s.endBanner);
   const [hovered, setHovered] = useState<Coord | null>(null);
 
+  const reviewing = analysis.status === 'done' || analysis.status === 'running';
+  const state =
+    reviewing && analysis.positions[analysis.cursor]
+      ? analysis.positions[analysis.cursor]!
+      : liveState;
+
+  const lastMove = (() => {
+    if (!reviewing || analysis.cursor <= 0) return reviewing ? null : liveLastMove;
+    const ply = analysis.plies[analysis.cursor - 1];
+    if (!ply || ply.played.type !== 'move') return null;
+    return { from: ply.played.from, to: ply.played.to };
+  })();
+
   const activeSession = battleMode === 'online' ? online : session;
   const myColor = battleMode === 'online' ? online.getMyColor() : 'white';
-  const legal = selected && !endBanner ? activeSession.getLegalMovesFrom(selected) : [];
+  const legal =
+    selected && !endBanner && !reviewing ? activeSession.getLegalMovesFrom(selected) : [];
   const legalMap = new Map(legal.map((m) => [`${m.to.x},${m.to.y}`, m]));
 
   const aiPlaying = useAppStore((s) => s.aiPlaying);
 
   const onCellClick = (pos: Coord) => {
-    if (endBanner || state.phase !== 'play') return;
+    if (reviewing || endBanner || state.phase !== 'play') return;
     if (battleMode === 'ai' && !aiPlaying) return;
     if (battleMode === 'online' && online.getStatus() !== 'playing') return;
     if (!myColor || state.activePlayer !== myColor) return;

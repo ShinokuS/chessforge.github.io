@@ -16,6 +16,30 @@
   padding-bottom: 0.85rem;
 }
 
+.headerRight {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+}
+
+.theme {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.theme select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg2);
+  border: 1px solid var(--accent-dim);
+  border-radius: 2px;
+  padding: 0.35rem 0.5rem;
+}
+
 .brand {
   display: flex;
   align-items: center;

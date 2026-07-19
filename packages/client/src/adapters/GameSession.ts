@@ -1,4 +1,4 @@
-import { buildAiDeck, chooseCommandAsync, type ChooseOptions } from '@chessforge/ai';
+import { buildAiDeck, type ChooseOptions } from '@chessforge/ai';
 import {
   applyCommand,
   createDemoMatch,
@@ -11,6 +11,7 @@ import {
 } from '@chessforge/engine';
 import type { Deck } from '../repositories/types.js';
 import { aiChooseOptions, clampAiStrength, type AiStrengthLevel } from '../battle/settings.js';
+import { getAiPool } from '../ai/AiWorkerPool.js';
 
 export type SessionMode = 'offline-ai' | 'hotseat';
 
@@ -34,16 +35,30 @@ export class GameSession {
   private lastError: string | null = null;
   private aiBusy = false;
   private aiOptions: ChooseOptions = aiChooseOptions(6);
+  /** Position at match start (for post-game analysis). */
+  private openingState: MatchState | null = null;
+  /** Player/AI commands applied this match, in order. */
+  private recordedCommands: GameCommand[] = [];
 
   constructor(
     private readonly mode: SessionMode = 'offline-ai',
     initial?: MatchState,
   ) {
     this.state = initial ?? createDemoMatch();
+    this.openingState = cloneState(this.state);
   }
 
   getState(): MatchState {
     return this.state;
+  }
+
+  /** Replay data for computer analysis (AI games). */
+  getReplay(): { opening: MatchState; commands: GameCommand[] } | null {
+    if (!this.openingState) return null;
+    return {
+      opening: cloneState(this.openingState),
+      commands: this.recordedCommands.map((c) => structuredClone(c)),
+    };
   }
 
   /** @deprecated prefer setAiStrength(0–10) */
@@ -83,6 +98,9 @@ export class GameSession {
     }
     this.lastError = null;
     this.state = result.state;
+    if (command.type === 'move') {
+      this.recordedCommands.push(structuredClone(command));
+    }
     this.emit(result.events);
 
     if (
@@ -99,20 +117,30 @@ export class GameSession {
   private async runAi(): Promise<void> {
     this.aiBusy = true;
     const opts = { ...this.aiOptions };
-    await new Promise((r) => setTimeout(r, 80));
+    // Let React paint the player's move before workers spin up.
+    await new Promise((r) => setTimeout(r, 16));
     if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') {
       this.aiBusy = false;
       return;
     }
-    const cmd = await chooseCommandAsync(this.state, opts);
-    this.aiBusy = false;
-    if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') return;
-    this.submitCommand(cmd);
+    try {
+      const cmd = await getAiPool().chooseCommand(this.state, opts);
+      if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') return;
+      this.submitCommand(cmd);
+    } catch (err) {
+      console.error('AI search failed', err);
+      this.lastError = 'ИИ не смог сделать ход';
+      this.emit([]);
+    } finally {
+      this.aiBusy = false;
+    }
   }
 
   restart(deck?: Deck): void {
     this.state = deck ? createMatchFromDeck(deck) : createDemoMatch();
     this.lastError = null;
+    this.recordedCommands = [];
+    this.openingState = cloneState(this.state);
     this.emit([]);
     if (this.mode === 'offline-ai' && this.state.activePlayer === 'black') {
       void this.runAi();
@@ -124,8 +152,21 @@ export class GameSession {
     if (this.state.phase !== 'play') return;
     this.state = { ...this.state, phase: 'gameOver', winner };
     this.lastError = null;
-    this.emit([]);
+    this.emit([{ type: 'GameOver', winner }]);
   }
+
+  /** `loser` resigns; opponent wins. */
+  resign(loser: 'white' | 'black'): void {
+    if (this.state.phase !== 'play') return;
+    const winner = loser === 'white' ? 'black' : 'white';
+    this.state = { ...this.state, phase: 'gameOver', winner };
+    this.lastError = null;
+    this.emit([{ type: 'GameOver', winner }]);
+  }
+}
+
+function cloneState(state: MatchState): MatchState {
+  return structuredClone(state);
 }
 
 export function pieceLabel(defId: string): string {

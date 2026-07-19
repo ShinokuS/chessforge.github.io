@@ -21,6 +21,10 @@ import {
   type SidePreference,
   type TimePresetId,
 } from '../battle/settings';
+import {
+  analyzeGame,
+  type AnalyzedPly,
+} from '../battle/analyzeGame';
 
 export type AppView = 'battle' | 'collection' | 'deck' | 'library';
 export type BattleMode = 'ai' | 'online';
@@ -31,9 +35,30 @@ export type LastMoveHighlight = {
 };
 
 export type EndBanner = {
-  kind: 'victory' | 'timeout';
+  kind: 'victory' | 'timeout' | 'resign';
   winner: PlayerId;
+  /** Who resigned (only for kind === 'resign'). */
+  loser?: PlayerId;
 };
+
+export type GameAnalysis = {
+  status: 'idle' | 'running' | 'done' | 'error';
+  progress: { done: number; total: number };
+  plies: AnalyzedPly[];
+  positions: MatchState[];
+  /** 0 = стартовая позиция, n = после n-го полухода. */
+  cursor: number;
+  error: string | null;
+};
+
+const idleAnalysis = (): GameAnalysis => ({
+  status: 'idle',
+  progress: { done: 0, total: 0 },
+  plies: [],
+  positions: [],
+  cursor: 0,
+  error: null,
+});
 
 function lastMoveFromEvents(events: GameEvent[]): LastMoveHighlight | null {
   let from: Coord | null = null;
@@ -84,6 +109,7 @@ type AppStore = {
   lastMove: LastMoveHighlight | null;
   clocks: MatchClocks;
   endBanner: EndBanner | null;
+  analysis: GameAnalysis;
   lastError: string | null;
   selected: Coord | null;
   setSelected: (c: Coord | null) => void;
@@ -102,6 +128,10 @@ type AppStore = {
   resetClocks: (active: PlayerId | null, initialMs?: number) => void;
   tickClock: () => void;
   dismissEndBanner: () => void;
+  startGameAnalysis: () => Promise<void>;
+  setAnalysisCursor: (cursor: number) => void;
+  clearAnalysis: () => void;
+  resign: () => void;
 };
 
 const repo = new LocalCollectionRepository();
@@ -146,7 +176,19 @@ export const useAppStore = create<AppStore>((set, get) => {
           active: null,
           lastTickAt: null,
         };
-        endBanner = { kind: 'victory', winner: e.winner };
+        const existing = get().endBanner;
+        if (existing?.kind === 'resign' || existing?.kind === 'timeout') {
+          endBanner = existing;
+        } else if (events.length === 1) {
+          // Lone GameOver = resign (or peer resign); combat ends with more events.
+          endBanner = {
+            kind: 'resign',
+            winner: e.winner,
+            loser: e.winner === 'white' ? 'black' : 'white',
+          };
+        } else {
+          endBanner = { kind: 'victory', winner: e.winner };
+        }
       }
     }
 
@@ -195,6 +237,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           lastMove: null,
           lastError: null,
           endBanner: null,
+          analysis: idleAnalysis(),
           clocks: freshClocks(null),
           state: session.getState(),
         });
@@ -208,6 +251,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastMove: null,
         lastError: null,
         endBanner: null,
+        analysis: idleAnalysis(),
         clocks: freshClocks(null),
         state: o.getState(),
       });
@@ -220,6 +264,7 @@ export const useAppStore = create<AppStore>((set, get) => {
     lastMove: null,
     clocks: freshClocks(null),
     endBanner: null,
+    analysis: idleAnalysis(),
     lastError: null,
     selected: null,
     setSelected: (selected) => set({ selected }),
@@ -269,13 +314,117 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ clocks: next });
     },
     dismissEndBanner: () => {
-      const { battleMode } = get();
+      const { battleMode, analysis } = get();
       if (battleMode === 'ai') {
-        set({ endBanner: null, aiPlaying: false, selected: null });
+        // Keep board if analysis is open / running.
+        const keepBoard = analysis.status === 'running' || analysis.status === 'done';
+        set({
+          endBanner: null,
+          aiPlaying: keepBoard,
+          selected: null,
+        });
         return;
       }
       set({ endBanner: null });
     },
+    resign: () => {
+      const { battleMode, session: s, online: o, endBanner, state, aiPlaying } = get();
+      if (endBanner || state.phase === 'gameOver') return;
+
+      if (battleMode === 'ai') {
+        if (!aiPlaying || state.phase !== 'play') return;
+        set({
+          endBanner: { kind: 'resign', winner: 'black', loser: 'white' },
+          selected: null,
+        });
+        s.resign('white');
+        return;
+      }
+
+      if (o.getStatus() !== 'playing' || state.phase !== 'play') return;
+      const myColor = o.getMyColor();
+      if (!myColor) return;
+      set({
+        endBanner: {
+          kind: 'resign',
+          winner: myColor === 'white' ? 'black' : 'white',
+          loser: myColor,
+        },
+        selected: null,
+      });
+      o.resign();
+    },
+    startGameAnalysis: async () => {
+      const { session: s, battleMode } = get();
+      if (battleMode !== 'ai') return;
+      const replay = s.getReplay();
+      if (!replay || replay.commands.length === 0) {
+        set({
+          analysis: {
+            ...idleAnalysis(),
+            status: 'error',
+            error: 'Нет ходов для анализа',
+          },
+          endBanner: null,
+          aiPlaying: true,
+        });
+        return;
+      }
+      set({
+        endBanner: null,
+        aiPlaying: true,
+        selected: null,
+        analysis: {
+          status: 'running',
+          progress: { done: 0, total: replay.commands.length },
+          plies: [],
+          positions: [structuredClone(replay.opening)],
+          cursor: 0,
+          error: null,
+        },
+      });
+      try {
+        const { plies, positions } = await analyzeGame(
+          replay.opening,
+          replay.commands,
+          undefined,
+          (p) => {
+            set({
+              analysis: {
+                ...get().analysis,
+                status: 'running',
+                progress: p,
+              },
+            });
+          },
+        );
+        set({
+          analysis: {
+            status: 'done',
+            progress: { done: plies.length, total: plies.length },
+            plies,
+            positions,
+            cursor: Math.max(0, positions.length - 1),
+            error: null,
+          },
+        });
+      } catch (err) {
+        set({
+          analysis: {
+            ...idleAnalysis(),
+            status: 'error',
+            error: err instanceof Error ? err.message : 'Ошибка анализа',
+          },
+        });
+      }
+    },
+    setAnalysisCursor: (cursor) => {
+      const { analysis } = get();
+      if (analysis.status !== 'done' || analysis.positions.length === 0) return;
+      const c = Math.max(0, Math.min(analysis.positions.length - 1, Math.floor(cursor)));
+      set({ analysis: { ...analysis, cursor: c }, selected: null });
+    },
+    clearAnalysis: () => set({ analysis: idleAnalysis() }),
     submitMove: (to) => {
       const { selected, battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying } =
         get();
@@ -316,6 +465,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastMove: null,
         lastError: null,
         endBanner: null,
+        analysis: idleAnalysis(),
         clocks: freshClocks('white', ms),
         state: s.getState(),
         view: 'battle',
@@ -332,6 +482,7 @@ export const useAppStore = create<AppStore>((set, get) => {
           lastMove: null,
           lastError: null,
           endBanner: null,
+          analysis: idleAnalysis(),
           clocks: freshClocks(null),
           state: o.getState(),
         });
@@ -344,6 +495,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastMove: null,
         lastError: null,
         endBanner: null,
+        analysis: idleAnalysis(),
         clocks: freshClocks(null),
         state: session.getState(),
       });

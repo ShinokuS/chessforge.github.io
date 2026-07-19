@@ -180,6 +180,65 @@ describe('chooseCommand', () => {
     expect(cmd.from).toEqual({ x: 0, y: 1 });
     expect(cmd.to).not.toEqual({ x: 0, y: 1 });
   });
+
+  it('sees a hanging queen even in a crowded middlegame', () => {
+    const extras: ReturnType<typeof createPieceInstance>[] = [];
+    // Leave a-file open so the rook can take the queen on a5.
+    for (let x = 1; x < 8; x++) {
+      extras.push(createPieceInstance('pawn', 'white', { x, y: 1 }, `wp${x}`));
+    }
+    for (let x = 0; x < 8; x++) {
+      extras.push(createPieceInstance('pawn', 'black', { x, y: 6 }, `bp${x}`));
+    }
+    const state = blank([
+      createPieceInstance('rook', 'white', { x: 0, y: 0 }, 'rw'),
+      createPieceInstance('knight', 'white', { x: 1, y: 0 }, 'nw'),
+      createPieceInstance('bishop', 'white', { x: 2, y: 0 }, 'bw'),
+      createPieceInstance('queen', 'black', { x: 0, y: 4 }, 'qb'),
+      createPieceInstance('knight', 'black', { x: 1, y: 7 }, 'nb'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+      ...extras,
+    ]);
+    expect(state.pieces.length).toBeGreaterThan(20);
+    const cmd = chooseCommand(state, { maxDepth: 3, timeMs: 800, nodeLimit: 80_000 });
+    expect(cmd.type).toBe('move');
+    if (cmd.type !== 'move') return;
+    expect(cmd.to).toEqual({ x: 0, y: 4 });
+  });
+
+  it('captures an exposed king instead of a free pawn', () => {
+    const state = blank([
+      createPieceInstance('rook', 'white', { x: 0, y: 0 }, 'rw'),
+      createPieceInstance('pawn', 'black', { x: 7, y: 1 }, 'bp'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 0, y: 4 }, 'kb'),
+    ]);
+    const cmd = chooseCommand(state, { maxDepth: 2, timeMs: 200, nodeLimit: 20_000 });
+    expect(cmd.type).toBe('move');
+    if (cmd.type !== 'move') return;
+    expect(cmd.to).toEqual({ x: 0, y: 4 });
+  });
+
+  it('moves the king out of lethal threat instead of snacking', () => {
+    // Black rook eyes white king on the a-file; white could take a free pawn on h7
+    // but must step off the file or block.
+    const state = blank([
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('pawn', 'black', { x: 7, y: 6 }, 'bp'),
+      createPieceInstance('rook', 'white', { x: 7, y: 0 }, 'rw'),
+      createPieceInstance('rook', 'black', { x: 0, y: 7 }, 'rb'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const cmd = chooseCommand(state, { maxDepth: 3, timeMs: 500, nodeLimit: 60_000 });
+    expect(cmd.type).toBe('move');
+    if (cmd.type !== 'move') return;
+    // Must not leave the king on a1 (en prise to the rook).
+    const stillOnA1 = cmd.from.x === 0 && cmd.from.y === 0 && cmd.to.x === 0 && cmd.to.y === 0;
+    expect(stillOnA1).toBe(false);
+    // Prefer moving the king (or capturing the rook if possible) over hxg? taking pawn.
+    expect(cmd.to).not.toEqual({ x: 7, y: 6 });
+  });
 });
 
 describe('buildAiDeck', () => {

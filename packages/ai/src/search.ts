@@ -6,7 +6,7 @@ import {
   type LegalMove,
   type MatchState,
 } from '@chessforge/engine';
-import { evaluate, pieceTacticalValue } from './evaluate.js';
+import { evaluate, pieceTacticalValue, isKingEnPrise } from './evaluate.js';
 import { hashPosition } from './zobrist.js';
 
 const DEFAULT_MAX_DEPTH = 4;
@@ -116,8 +116,10 @@ function scoreMove(
     const victim = target ? pieceTacticalValue(target.defId) : 100;
     const attacker = state.pieces.find((p) => p.pos.x === m.from.x && p.pos.y === m.from.y);
     const atk = attacker ? pieceTacticalValue(attacker.defId) : 100;
-    // MVV-LVA
-    s += 10_000 + victim * 16 - Math.floor(atk / 8);
+    // MVV-LVA — king takes are absolute priority (game over).
+    const isKingCap =
+      target && getPieceDefinition(target.defId).baseRole === 'king';
+    s += isKingCap ? 5_000_000 : 10_000 + victim * 16 - Math.floor(atk / 8);
     if (target && attacker && getPieceDefinition(attacker.defId).freezeInsteadOfCapture) {
       s += 800; // prefer freeze tempos
     }
@@ -184,7 +186,27 @@ function evalStm(state: MatchState, ply: number): number {
 
 function quiesce(state: MatchState, alpha: number, beta: number, ctx: SearchContext, ply: number): number {
   ctx.nodes += 1;
-  if (shouldStop(ctx) || state.phase === 'gameOver') return evalStm(state, ply);
+  if (shouldStop(ctx) || state.phase === 'gameOver' || ply > 40) return evalStm(state, ply);
+
+  const inCheck = isKingEnPrise(state, state.activePlayer);
+
+  // When the king can be taken, stand-pat is meaningless — search ALL evasions
+  // (quiet king flights / interpositions), not just captures.
+  if (inCheck) {
+    const evasions = orderMoves(state, getLegalMoves(state), ctx, ply, null);
+    if (evasions.length === 0) return evalStm(state, ply);
+    let best = -INF;
+    for (const m of evasions) {
+      if (shouldStop(ctx)) break;
+      const result = applyCommand(state, moveToCommand(m));
+      if (!result.ok) continue;
+      const score = -quiesce(result.state, -beta, -alpha, ctx, ply + 1);
+      if (score > best) best = score;
+      if (score >= beta) return score;
+      if (score > alpha) alpha = score;
+    }
+    return best === -INF ? evalStm(state, ply) : best;
+  }
 
   const standPat = evalStm(state, ply);
   if (standPat >= beta) return standPat;
@@ -221,13 +243,32 @@ function negamax(
   if (shouldStop(ctx) || state.phase === 'gameOver') {
     return evalStm(state, ply);
   }
-  if (depth <= 0) {
+
+  const inCheck = isKingEnPrise(state, state.activePlayer);
+  // Check extension: don't drop into qsearch while the king is hanging.
+  let d = depth;
+  if (inCheck && d < 12) d += 1;
+
+  if (d <= 0) {
     return quiesce(state, alpha, beta, ctx, ply);
   }
 
   const key = hashPosition(state);
-  const probed = ttProbe(ctx, key, depth, alpha, beta);
+  const probed = ttProbe(ctx, key, d, alpha, beta);
   if (probed.hit) return probed.score;
+
+  // Null-move pruning — never when in check (king en prise).
+  if (!inCheck && d >= 3 && ply > 0 && state.pieces.length >= 8 && beta < 500_000) {
+    const nullRes = applyCommand(state, { type: 'endTurn' });
+    if (nullRes.ok && nullRes.state.phase === 'play') {
+      const R = d >= 6 ? 3 : 2;
+      const nm = -negamax(nullRes.state, d - 1 - R, -beta, -beta + 1, ctx, ply + 1);
+      if (nm >= beta) {
+        if (!ctx.stopped) ttStore(ctx, key, d, nm, 'lower', null);
+        return nm;
+      }
+    }
+  }
 
   const moves = orderMoves(state, getLegalMoves(state), ctx, ply, probed.moveKey);
   if (moves.length === 0) {
@@ -238,12 +279,42 @@ function negamax(
   let bestMove: string | null = null;
   let exactAlpha = alpha;
   let bound: Bound = 'upper';
+  let moveIndex = 0;
 
   for (const m of moves) {
     if (shouldStop(ctx)) break;
     const result = applyCommand(state, moveToCommand(m));
     if (!result.ok) continue;
-    const score = -negamax(result.state, depth - 1, -beta, -exactAlpha, ctx, ply + 1);
+
+    const givesCheck =
+      result.state.phase === 'play' && isKingEnPrise(result.state, result.state.activePlayer);
+
+    let reduction = 0;
+    if (
+      !inCheck &&
+      !givesCheck &&
+      d >= 3 &&
+      moveIndex >= 3 &&
+      !m.captures &&
+      !m.abilityId &&
+      Math.abs(exactAlpha) < 400_000
+    ) {
+      reduction = moveIndex >= 8 && d >= 5 ? 2 : 1;
+    }
+
+    let score = -negamax(
+      result.state,
+      d - 1 - reduction,
+      -beta,
+      -exactAlpha,
+      ctx,
+      ply + 1,
+    );
+    if (reduction > 0 && score > exactAlpha && !ctx.stopped) {
+      score = -negamax(result.state, d - 1, -beta, -exactAlpha, ctx, ply + 1);
+    }
+
+    moveIndex += 1;
     if (score > best) {
       best = score;
       bestMove = moveKey(m);
@@ -255,18 +326,18 @@ function negamax(
     if (exactAlpha >= beta) {
       bound = 'lower';
       if (!m.captures) storeKiller(ctx, ply, moveKey(m));
-      ctx.history.set(moveKey(m), (ctx.history.get(moveKey(m)) ?? 0) + ply * depth);
+      ctx.history.set(moveKey(m), (ctx.history.get(moveKey(m)) ?? 0) + ply * d);
       break;
     }
   }
 
   if (best === -INF) best = evalStm(state, ply);
-  if (!ctx.stopped) ttStore(ctx, key, depth, best, bound, bestMove);
+  if (!ctx.stopped) ttStore(ctx, key, d, best, bound, bestMove);
   return best;
 }
 
 function createContext(timeMs: number, nodeLimit: number, ttBits = DEFAULT_TT_BITS): SearchContext {
-  const bits = Math.max(12, Math.min(18, ttBits | 0));
+  const bits = Math.max(12, Math.min(20, ttBits | 0));
   const size = 1 << bits;
   return {
     nodes: 0,
@@ -306,7 +377,7 @@ function resolveSearchOpts(options: ChooseOptions): {
   ttBits: number;
 } {
   return {
-    maxDepth: Math.max(1, Math.min(16, options.maxDepth ?? options.depth ?? DEFAULT_MAX_DEPTH)),
+    maxDepth: Math.max(1, Math.min(24, options.maxDepth ?? options.depth ?? DEFAULT_MAX_DEPTH)),
     timeMs: options.timeMs ?? DEFAULT_TIME_MS,
     nodeLimit: options.nodeLimit ?? DEFAULT_NODE_LIMIT,
     skill: Math.max(0, Math.min(10, options.skill ?? 10)),
@@ -332,6 +403,7 @@ function pickRootMove(
   const ordered = orderMoves(state, rootMoves, ctx, 0, moveKey(prevBest));
   let iterBest = ordered[0]!;
   let iterScore = -INF;
+  let trueScore = -INF;
   let completed = true;
 
   for (const m of ordered) {
@@ -346,10 +418,47 @@ function pickRootMove(
     if (adjusted > iterScore) {
       iterScore = adjusted;
       iterBest = m;
+      trueScore = score;
     }
   }
 
-  return { best: iterBest, score: iterScore, completed };
+  return { best: iterBest, score: trueScore, completed };
+}
+
+/**
+ * Score a subset of root moves at a fixed depth (for multi-worker parallel search).
+ * Runs fully synchronously — call from a Web Worker so the UI thread stays free.
+ * Returns `completed: false` if the budget ran out before every move was scored.
+ */
+export function scoreRootMoves(
+  state: MatchState,
+  moves: LegalMove[],
+  depth: number,
+  options: ChooseOptions = {},
+): { results: Array<{ move: LegalMove; score: number }>; completed: boolean } {
+  const { timeMs, nodeLimit, ttBits } = resolveSearchOpts({ ...options, skill: 10 });
+  const ctx = createContext(timeMs, nodeLimit, ttBits);
+  const d = Math.max(1, depth);
+  const out: Array<{ move: LegalMove; score: number }> = [];
+  const hardLimit = ctx.nodeLimit;
+  const perMoveNodes = Math.max(1_200, Math.floor(nodeLimit / Math.max(1, moves.length)));
+
+  for (const m of moves) {
+    if (ctx.nodes >= hardLimit || Date.now() >= ctx.deadline) {
+      return { results: out, completed: false };
+    }
+    ctx.stopped = false;
+    const result = applyCommand(state, moveToCommand(m));
+    if (!result.ok) continue;
+    const nodesBefore = ctx.nodes;
+    ctx.nodeLimit = Math.min(hardLimit, nodesBefore + perMoveNodes);
+    const score = -negamax(result.state, d - 1, -INF, INF, ctx, 1);
+    ctx.nodeLimit = hardLimit;
+    // Soft per-move cap may set stopped — clear so remaining moves still get scored.
+    if (ctx.nodes < hardLimit && Date.now() < ctx.deadline) ctx.stopped = false;
+    out.push({ move: m, score });
+  }
+  return { results: out, completed: out.length >= moves.length };
 }
 
 /**
@@ -426,4 +535,110 @@ export async function chooseCommandAsync(
   }
 
   return moveToCommand(bestMove);
+}
+
+export type SearchResult = {
+  best: GameCommand;
+  /** Centipawns from side-to-move perspective. */
+  score: number;
+  /** Centipawns from white's perspective (Lichess-style). */
+  scoreWhite: number;
+};
+
+function runIterativeSearch(
+  state: MatchState,
+  options: ChooseOptions,
+): { best: LegalMove; score: number } | null {
+  const rootMoves = getLegalMoves(state);
+  if (rootMoves.length === 0) return null;
+
+  const { maxDepth, timeMs, nodeLimit, ttBits } = resolveSearchOpts({
+    ...options,
+    skill: 10,
+  });
+  const ctx = createContext(timeMs, nodeLimit, ttBits);
+
+  let bestMove = rootMoves[0]!;
+  let bestScore = -INF;
+
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    if (shouldStop(ctx) && depth > 1) break;
+    const { best, score, completed } = pickRootMove(state, rootMoves, depth, ctx, 10, bestMove);
+    if (completed || depth === 1) {
+      bestMove = best;
+      bestScore = score;
+    } else if (score > bestScore) {
+      bestMove = best;
+      bestScore = score;
+    }
+    if (bestScore > 500_000) break;
+    if (shouldStop(ctx)) break;
+  }
+
+  return { best: bestMove, score: bestScore };
+}
+
+/**
+ * Full iterative search returning STM and white-centric scores.
+ * Used by post-game analysis (search engine, not static eval).
+ */
+export function searchPosition(state: MatchState, options: ChooseOptions = {}): SearchResult {
+  if (state.phase === 'gameOver') {
+    const scoreWhite =
+      state.winner === 'white' ? 1_000_000 : state.winner === 'black' ? -1_000_000 : 0;
+    return {
+      best: { type: 'endTurn' },
+      score: state.activePlayer === 'white' ? scoreWhite : -scoreWhite,
+      scoreWhite,
+    };
+  }
+
+  const found = runIterativeSearch(state, options);
+  if (!found) {
+    const stand = evaluate(state, state.activePlayer);
+    return {
+      best: { type: 'endTurn' },
+      score: stand,
+      scoreWhite: state.activePlayer === 'white' ? stand : -stand,
+    };
+  }
+
+  const scoreWhite = state.activePlayer === 'white' ? found.score : -found.score;
+  return {
+    best: moveToCommand(found.best),
+    score: found.score,
+    scoreWhite,
+  };
+}
+
+/** White-centric search eval after applying `command`. */
+export function searchScoreWhiteAfter(
+  state: MatchState,
+  command: GameCommand,
+  options: ChooseOptions = {},
+): number {
+  const result = applyCommand(state, command);
+  if (!result.ok) {
+    return state.activePlayer === 'white' ? -INF : INF;
+  }
+  return searchPosition(result.state, options).scoreWhite;
+}
+
+/** STM search score for a specific root command. */
+export function searchScoreCommand(
+  state: MatchState,
+  command: GameCommand,
+  options: ChooseOptions = {},
+): number {
+  const { maxDepth, timeMs, nodeLimit, ttBits } = resolveSearchOpts({
+    ...options,
+    skill: 10,
+  });
+  const ctx = createContext(timeMs, nodeLimit, ttBits);
+  const result = applyCommand(state, command);
+  if (!result.ok) return -INF;
+  if (result.state.phase === 'gameOver') {
+    return -evalStm(result.state, 1);
+  }
+  return -negamax(result.state, Math.max(0, maxDepth - 1), -INF, INF, ctx, 1);
 }

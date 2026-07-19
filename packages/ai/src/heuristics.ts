@@ -28,7 +28,7 @@ function movementRichness(patterns: ReadonlyArray<MovementPattern>, depth = 0): 
 export function featureModBonus(def: PieceDefinition): number {
   if (def.isBase) return 0;
 
-  let b = def.cost * 36;
+  let b = def.cost * 22;
 
   if (def.maxHp > 1) b += (def.maxHp - 1) * 55;
   if (def.attack <= 0 && !def.freezeInsteadOfCapture && !def.lineBuff) b -= 25;
@@ -52,12 +52,14 @@ export function featureModBonus(def: PieceDefinition): number {
   // Relative to a typical base of the same role (~8–16).
   b += Math.max(-40, Math.min(70, (rich - 10) * 4));
 
-  return Math.round(b);
+  // Keep mods in a sane band so search isn't drowned by static inflation.
+  // Cap was 200 — that made fancy decks look “winning” while getting mated.
+  return Math.round(Math.max(-80, Math.min(110, b)));
 }
 
 /** Unused once-per-match ability value (id-agnostic). */
 export function unusedAbilityValue(): number {
-  return 70;
+  return 40;
 }
 
 /**

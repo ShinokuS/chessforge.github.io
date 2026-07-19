@@ -47,6 +47,36 @@ function chebyshev(a: Coord, b: Coord): number {
   return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 }
 
+function gcd(a: number, b: number): number {
+  let x = Math.abs(a);
+  let y = Math.abs(b);
+  while (y) {
+    const t = y;
+    y = x % y;
+    x = t;
+  }
+  return x;
+}
+
+/**
+ * For multi-step leaps (pawn double-push, spearman ×2, mountain-extended…),
+ * intermediate squares must be empty and passable. Knight-like leaps (gcd=1) skip this.
+ */
+function pathClear(state: MatchState, from: Coord, to: Coord): boolean {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const steps = gcd(dx, dy);
+  if (steps <= 1) return true;
+  const sx = dx / steps;
+  const sy = dy / steps;
+  for (let i = 1; i < steps; i++) {
+    const mid = { x: from.x + sx * i, y: from.y + sy * i };
+    if (!isPassable(state.board, mid)) return false;
+    if (pieceAt(state, mid)) return false;
+  }
+  return true;
+}
+
 function isKingRole(defId: string): boolean {
   return getPieceDefinition(defId).baseRole === 'king';
 }
@@ -91,6 +121,7 @@ function tryAddMove(
   const { board } = state;
   if (!inBounds(to, board.width, board.height)) return 'edge';
   if (!isPassable(board, to)) return 'blocked';
+  if (!pathClear(state, from, to)) return 'blocked';
 
   const mover = pieceAt(state, from);
   const occupant = pieceAt(state, to);

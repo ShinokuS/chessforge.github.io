@@ -237,6 +237,15 @@ export class OnlineGameSession {
       this.setStatus('disconnected');
       this.emit([]);
     }
+
+    if (msg.type === 'resign') {
+      if (this.status !== 'playing' || this.state.phase !== 'play') return;
+      if (this.myColor && msg.by === this.myColor) return;
+      const winner: PlayerId = msg.by === 'white' ? 'black' : 'white';
+      this.state = { ...this.state, phase: 'gameOver', winner };
+      this.lastError = null;
+      this.emit([{ type: 'GameOver', winner }]);
+    }
   }
 
   async createRoom(
@@ -362,7 +371,18 @@ export class OnlineGameSession {
     if (this.status !== 'playing' || this.state.phase !== 'play') return;
     this.state = { ...this.state, phase: 'gameOver', winner };
     this.lastError = null;
-    this.emit([]);
+    this.emit([{ type: 'GameOver', winner }]);
+  }
+
+  /** Local player resigns; notifies peer. */
+  resign(): void {
+    if (this.status !== 'playing' || this.state.phase !== 'play' || !this.myColor) return;
+    const loser = this.myColor;
+    const winner: PlayerId = loser === 'white' ? 'black' : 'white';
+    this.state = { ...this.state, phase: 'gameOver', winner };
+    this.lastError = null;
+    this.send({ type: 'resign', by: loser });
+    this.emit([{ type: 'GameOver', winner }]);
   }
 
   disconnect(): void {

@@ -85,6 +85,36 @@ describe('tiles', () => {
     expect(moves.some((m) => m.to.x === 0 && m.to.y === 3)).toBe(false);
   });
 
+  it('pawn double-step cannot jump over a piece', () => {
+    const state = blankMatch([
+      createPieceInstance('pawn', 'white', { x: 4, y: 1 }, 'pw'),
+      createPieceInstance('pawn', 'black', { x: 4, y: 2 }, 'pb'),
+    ]);
+    const moves = getLegalMoves(state, { x: 4, y: 1 });
+    expect(moves.some((m) => m.to.x === 4 && m.to.y === 2)).toBe(false);
+    expect(moves.some((m) => m.to.x === 4 && m.to.y === 3)).toBe(false);
+  });
+
+  it('pawn double-step cannot jump over a lake', () => {
+    const state = blankMatch(
+      [createPieceInstance('pawn', 'white', { x: 4, y: 1 }, 'pw')],
+      [{ pos: { x: 4, y: 2 }, tileId: 'lake' }],
+    );
+    const moves = getLegalMoves(state, { x: 4, y: 1 });
+    expect(moves.some((m) => m.to.x === 4 && m.to.y === 2)).toBe(false);
+    expect(moves.some((m) => m.to.x === 4 && m.to.y === 3)).toBe(false);
+  });
+
+  it('knight still leaps over occupied squares', () => {
+    const state = blankMatch([
+      createPieceInstance('knight', 'white', { x: 3, y: 3 }, 'nw'),
+      createPieceInstance('pawn', 'white', { x: 3, y: 4 }, 'pw'),
+      createPieceInstance('pawn', 'black', { x: 4, y: 4 }, 'pb'),
+    ]);
+    const moves = getLegalMoves(state, { x: 3, y: 3 });
+    expect(moves.some((m) => m.to.x === 4 && m.to.y === 5)).toBe(true);
+  });
+
   it('cave allows move to partner on a later turn, not on enter', () => {
     const state = blankMatch(
       [

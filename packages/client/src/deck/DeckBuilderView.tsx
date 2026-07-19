@@ -156,10 +156,6 @@ export function DeckBuilderView() {
     <section className={styles.wrap}>
       <div className={styles.head}>
         <h2>Сбор колоды</h2>
-        <p>
-          Полный комплект из {totalSlots} фигур. Базовые карты бесплатны; очки тратятся на
-          модификации (у Якоря cost −3). Лимит колоды: {DECK_COST_CAP}.
-        </p>
 
         <div className={styles.deckBar}>
           <label className={styles.name}>

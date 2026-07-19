@@ -15,7 +15,8 @@ export type PeerMessage =
   | { type: 'command'; command: GameCommand; by: PlayerId }
   | { type: 'commandRequest'; command: GameCommand }
   | { type: 'error'; message: string }
-  | { type: 'opponentLeft' };
+  | { type: 'opponentLeft' }
+  | { type: 'resign'; by: PlayerId };
 
 export function randomRoomCode(): string {
   const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789';

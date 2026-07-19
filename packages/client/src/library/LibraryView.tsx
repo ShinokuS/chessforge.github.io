@@ -34,10 +34,7 @@ export function LibraryView() {
             <div>
               <h3>{tile.name}</h3>
               <p>{tile.description}</p>
-              <p className={styles.meta}>
-                id: {tile.id}
-                {!tile.passable ? ' · непроходимо' : ''}
-              </p>
+              {!tile.passable && <p className={styles.meta}>непроходимо</p>}
             </div>
           </li>
         ))}
