@@ -11,6 +11,19 @@ pnpm dev
 
 Откройте `http://127.0.0.1:5173/`.
 
+## ИИ
+
+Оффлайн-соперник использует Stockfish-style TypeScript-поиск: iterative PVS,
+quiescence, transposition table, move ordering и динамический root split между
+Web Workers. Архитектура и уровни силы описаны в
+[`packages/ai/README.md`](packages/ai/README.md).
+
+```bash
+pnpm ai:bench
+pnpm test
+pnpm build
+```
+
 ## Онлайн (без своего сервера)
 
 PeerJS/WebRTC **не используется** — через VPN он постоянно ломается (`ICE failed`).

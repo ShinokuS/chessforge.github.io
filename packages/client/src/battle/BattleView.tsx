@@ -3,7 +3,7 @@ import styles from './BattleView.module.css';
 import { BoardView } from './BoardView';
 import { formatClock } from './clock';
 import { formatEvalCp, judgmentLabel, type AnalyzedPly, type MoveJudgment } from './analyzeGame';
-import { assignDisplayTurns, groupHistoryForDisplay, historyForViewer } from './moveHistory';
+import { assignDisplayTurns, groupHistoryForDisplay, historyForViewer, historyCursorInEntry, historyCursorForEntry } from './moveHistory';
 import {
   aiSearchProfile,
   SIDE_OPTIONS,
@@ -12,6 +12,7 @@ import {
   type SidePreference,
   type TimePresetId,
 } from './settings';
+import { StrengthPicker } from './StrengthPicker';
 import { useAppStore } from '../app/store';
 import { PieceIcon } from './PieceIcon';
 
@@ -39,7 +40,7 @@ export function BattleView() {
   const resetClocks = useAppStore((s) => s.resetClocks);
   const dismissEndBanner = useAppStore((s) => s.dismissEndBanner);
   const analysis = useAppStore((s) => s.analysis);
-  const startGameAnalysis = useAppStore((s) => s.startGameAnalysis);
+  const saveAndOpenAnalysis = useAppStore((s) => s.saveAndOpenAnalysis);
   const setAnalysisCursor = useAppStore((s) => s.setAnalysisCursor);
   const clearAnalysis = useAppStore((s) => s.clearAnalysis);
   const battleMode = useAppStore((s) => s.battleMode);
@@ -128,7 +129,10 @@ export function BattleView() {
     () => groupHistoryForDisplay(historyForViewer(moveHistory, historyViewer, state)),
     [moveHistory, historyViewer, state],
   );
-  const lastPly = moveHistory.reduce((max, e) => (e.kind === 'ply' ? Math.max(max, e.ply) : max), 0);
+  const lastPly = moveHistory.reduce(
+    (max, e) => (e.kind === 'ply' ? Math.max(max, e.endPly ?? e.ply) : max),
+    0,
+  );
   const historyScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = historyScrollRef.current;
@@ -355,19 +359,11 @@ export function BattleView() {
             </select>
           </label>
 
-          <label className={styles.lobbyField}>
-            Сила ИИ · {aiStrength}/10
-            <input
-              type="range"
-              className={styles.strengthSlider}
-              min={0}
-              max={10}
-              step={1}
-              value={aiStrength}
-              onChange={(e) => setAiStrength(Number(e.target.value))}
-            />
-            <span className={styles.sliderHint}>{aiSearchProfile(aiStrength).hint}</span>
-          </label>
+          <StrengthPicker
+            label={`Сила ИИ · ${aiStrength}/10`}
+            value={aiStrength}
+            onChange={setAiStrength}
+          />
 
           <fieldset className={styles.optionGroup}>
             <legend>Время на сторону</legend>
@@ -610,13 +606,19 @@ export function BattleView() {
                               <span className={styles.historyIndex}>{row.turn}.</span>
                               <AnalysisMoveCell
                                 ply={whitePly}
-                                active={analysis.cursor === whitePly?.ply}
-                                onClick={() => whitePly && setAnalysisCursor(whitePly.ply)}
+                                {...(row.white?.text ? { label: row.white.text } : {})}
+                                active={historyCursorInEntry(analysis.cursor, row.white)}
+                                onClick={() => {
+                                  if (row.white) setAnalysisCursor(historyCursorForEntry(row.white));
+                                }}
                               />
                               <AnalysisMoveCell
                                 ply={blackPly}
-                                active={analysis.cursor === blackPly?.ply}
-                                onClick={() => blackPly && setAnalysisCursor(blackPly.ply)}
+                                {...(row.black?.text ? { label: row.black.text } : {})}
+                                active={historyCursorInEntry(analysis.cursor, row.black)}
+                                onClick={() => {
+                                  if (row.black) setAnalysisCursor(historyCursorForEntry(row.black));
+                                }}
                               />
                             </li>
                           );
@@ -675,7 +677,9 @@ export function BattleView() {
                             <span
                               className={[
                                 styles.historyMove,
-                                row.white && row.white.ply === lastPly ? styles.historyActive : '',
+                                row.white && historyCursorInEntry(lastPly, row.white)
+                                  ? styles.historyActive
+                                  : '',
                               ]
                                 .filter(Boolean)
                                 .join(' ')}
@@ -685,7 +689,9 @@ export function BattleView() {
                             <span
                               className={[
                                 styles.historyMove,
-                                row.black && row.black.ply === lastPly ? styles.historyActive : '',
+                                row.black && historyCursorInEntry(lastPly, row.black)
+                                  ? styles.historyActive
+                                  : '',
                               ]
                                 .filter(Boolean)
                                 .join(' ')}
@@ -767,26 +773,27 @@ export function BattleView() {
                   : 'Король соперника повержен.'}
             </p>
             <div className={styles.endActions}>
-              {battleMode === 'ai' && (
-                <button
-                  type="button"
-                  className={styles.primary}
-                  onClick={() => {
-                    void startGameAnalysis();
-                  }}
-                >
-                  Анализ партии
-                </button>
-              )}
               <button
                 type="button"
-                className={battleMode === 'ai' ? styles.endDismiss : styles.primary}
+                className={styles.primary}
+                onClick={() => {
+                  const saved = saveAndOpenAnalysis();
+                  if (!saved) {
+                    window.alert('Нечего сохранять: в партии нет ходов.');
+                  }
+                }}
+              >
+                Сохранить и проанализировать
+              </button>
+              <button
+                type="button"
+                className={styles.endDismiss}
                 onClick={() => {
                   clearAnalysis();
                   restart();
                 }}
               >
-                {battleMode === 'ai' ? 'В лобби' : 'Выйти в лобби'}
+                В лобби
               </button>
               <button type="button" className={styles.endDismiss} onClick={dismissEndBanner}>
                 Закрыть
@@ -801,30 +808,36 @@ export function BattleView() {
 
 function AnalysisMoveCell({
   ply,
+  label,
   active,
   onClick,
 }: {
   ply: AnalyzedPly | undefined;
+  label?: string;
   active: boolean;
   onClick: () => void;
 }) {
-  if (!ply) return <span className={styles.historyMove} />;
+  if (!ply && !label) return <span className={styles.historyMove} />;
   return (
     <button
       type="button"
       className={[
         styles.historyMove,
         styles.analysisMoveBtn,
-        JUDGMENT_CLASS[ply.judgment],
+        ply ? JUDGMENT_CLASS[ply.judgment] : '',
         active ? styles.historyActive : '',
       ]
         .filter(Boolean)
         .join(' ')}
       onClick={onClick}
-      title={`${judgmentLabel(ply.judgment)} · ${formatEvalCp(ply.evalAfter)}`}
+      title={
+        ply
+          ? `${judgmentLabel(ply.judgment)} · ${formatEvalCp(ply.evalAfter)}`
+          : undefined
+      }
     >
-      <span className={styles.judgmentDot} aria-hidden />
-      {ply.playedLabel}
+      {ply && <span className={styles.judgmentDot} aria-hidden />}
+      {label ?? ply?.playedLabel ?? ''}
     </button>
   );
 }

@@ -7,14 +7,13 @@ import {
   type PlayerId,
 } from '@chessforge/engine';
 import { getAiPool } from '../ai/AiWorkerPool.js';
+import {
+  classifyByWinChance,
+  judgmentLabel as judgmentLabelShared,
+  type MoveJudgment,
+} from '../analysis/moveJudgment.js';
 
-export type MoveJudgment =
-  | 'best'
-  | 'excellent'
-  | 'good'
-  | 'inaccuracy'
-  | 'mistake'
-  | 'blunder';
+export type { MoveJudgment };
 
 export type AnalyzedPly = {
   ply: number;
@@ -45,23 +44,16 @@ export type AnalysisProgress = {
  */
 export const ANALYSIS_OPTIONS: ChooseOptions = {
   maxDepth: 8,
-  timeMs: 600,
-  nodeLimit: 220_000,
+  timeMs: 350,
+  nodeLimit: 400_000,
   skill: 10,
-  ttBits: 17,
-};
-
-const JUDGMENT_RU: Record<MoveJudgment, string> = {
-  best: 'Лучший',
-  excellent: 'Отличный',
-  good: 'Хороший',
-  inaccuracy: 'Неточность',
-  mistake: 'Ошибка',
-  blunder: 'Зевок',
+  ttBits: 18,
+  workers: 4,
+  engine: 'stockfish',
 };
 
 export function judgmentLabel(j: MoveJudgment): string {
-  return JUDGMENT_RU[j];
+  return judgmentLabelShared(j);
 }
 
 function sq(x: number, y: number): string {
@@ -109,15 +101,6 @@ function commandsEqual(a: GameCommand, b: GameCommand): boolean {
     );
   }
   return JSON.stringify(a) === JSON.stringify(b);
-}
-
-function classify(loss: number, sameAsBest: boolean): MoveJudgment {
-  if (sameAsBest || loss <= 20) return 'best';
-  if (loss <= 50) return 'excellent';
-  if (loss <= 90) return 'good';
-  if (loss <= 160) return 'inaccuracy';
-  if (loss <= 300) return 'mistake';
-  return 'blunder';
 }
 
 /**
@@ -188,7 +171,7 @@ export async function analyzeGame(
       evalAfter,
       evalBest,
       loss,
-      judgment: classify(loss, sameAsBest),
+      judgment: classifyByWinChance(evalBefore, evalAfter, player, sameAsBest).judgment,
       playedLabel,
       bestLabel,
       sameAsBest,
@@ -204,7 +187,9 @@ export async function analyzeGame(
 
 /** Format white-centric cp for display (e.g. +1.2, −0.4). */
 export function formatEvalCp(cp: number): string {
-  if (Math.abs(cp) >= 50_000) return cp > 0 ? 'М#' : '−М#';
+  // Real search mates are ±1_000_000. Static king-threat penalties are ~75_000 —
+  // those must NOT be shown as mate.
+  if (Math.abs(cp) >= 500_000) return cp > 0 ? 'М#' : '−М#';
   const p = cp / 100;
   const sign = p > 0 ? '+' : '';
   return `${sign}${p.toFixed(1)}`;

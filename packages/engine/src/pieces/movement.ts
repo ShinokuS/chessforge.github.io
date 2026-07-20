@@ -41,8 +41,39 @@ function orientOffset(owner: PlayerId, offset: Coord): Coord {
   return { x: offset.x, y: offset.y * facingSign(owner) };
 }
 
-function pieceAt(state: MatchState, pos: Coord): PieceInstance | undefined {
+function pieceAt(state: MatchState, pos: Coord, grid?: PieceGrid): PieceInstance | undefined {
+  if (grid) return grid[pos.y * state.board.width + pos.x];
   return state.pieces.find((p) => coordsEqual(p.pos, pos));
+}
+
+type PieceGrid = (PieceInstance | undefined)[];
+
+function buildPieceGrid(state: MatchState): PieceGrid {
+  const w = state.board.width;
+  const grid: PieceGrid = new Array(w * state.board.height);
+  for (const p of state.pieces) {
+    grid[p.pos.y * w + p.pos.x] = p;
+  }
+  return grid;
+}
+
+/** Shared per-position data — built once per getAllLegalMoves call. */
+export type MoveGenCache = {
+  grid: PieceGrid;
+  buffed: Set<string>;
+  marshSlowed: Set<string>;
+};
+
+export function createMoveGenCache(state: MatchState): MoveGenCache {
+  const marshSlowed = new Set<string>();
+  for (const p of state.pieces) {
+    if (isMarshSlowed(state, p)) marshSlowed.add(p.id);
+  }
+  return {
+    grid: buildPieceGrid(state),
+    buffed: getBuffedPieceIds(state),
+    marshSlowed,
+  };
 }
 
 function chebyshev(a: Coord, b: Coord): number {
@@ -64,7 +95,7 @@ function gcd(a: number, b: number): number {
  * For multi-step leaps (pawn double-push, spearman ×2, mountain-extended…),
  * intermediate squares must be empty and passable. Knight-like leaps (gcd=1) skip this.
  */
-function pathClear(state: MatchState, from: Coord, to: Coord): boolean {
+function pathClear(state: MatchState, from: Coord, to: Coord, grid?: PieceGrid): boolean {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const steps = gcd(dx, dy);
@@ -74,7 +105,7 @@ function pathClear(state: MatchState, from: Coord, to: Coord): boolean {
   for (let i = 1; i < steps; i++) {
     const mid = { x: from.x + sx * i, y: from.y + sy * i };
     if (!isPassable(state.board, mid)) return false;
-    if (pieceAt(state, mid)) return false;
+    if (pieceAt(state, mid, grid)) return false;
   }
   return true;
 }
@@ -123,14 +154,15 @@ function tryAddMove(
   mode: 'quiet' | 'capture' | 'both',
   out: LegalMove[],
   abilityId?: AbilityId,
+  grid?: PieceGrid,
 ): 'empty' | 'blocked' | 'edge' {
   const { board } = state;
   if (!inBounds(to, board.width, board.height)) return 'edge';
   if (!isPassable(board, to)) return 'blocked';
-  if (!pathClear(state, from, to)) return 'blocked';
+  if (!pathClear(state, from, to, grid)) return 'blocked';
 
-  const mover = pieceAt(state, from);
-  const occupant = pieceAt(state, to);
+  const mover = pieceAt(state, from, grid);
+  const occupant = pieceAt(state, to, grid);
   if (!occupant) {
     if (mode === 'quiet' || mode === 'both') {
       out.push({
@@ -167,6 +199,7 @@ function expandPattern(
   mover: PieceInstance,
   pattern: MovementPattern,
   mode: 'quiet' | 'capture' | 'both',
+  grid?: PieceGrid,
 ): LegalMove[] {
   const moves: LegalMove[] = [];
   const leapBonus = mountainLeapBonus(state, mover);
@@ -174,7 +207,7 @@ function expandPattern(
   if (pattern.kind === 'conditional') {
     if (pattern.when === 'neverMoved' && mover.hasMoved) return moves;
     for (const nested of pattern.patterns) {
-      moves.push(...expandPattern(state, mover, nested, mode));
+      moves.push(...expandPattern(state, mover, nested, mode, grid));
     }
     return moves;
   }
@@ -183,7 +216,7 @@ function expandPattern(
     for (const raw of pattern.offsets) {
       const base = orientOffset(mover.owner, raw);
       const to = { x: mover.pos.x + base.x, y: mover.pos.y + base.y };
-      tryAddMove(state, mover.pos, to, mode, moves);
+      tryAddMove(state, mover.pos, to, mode, moves, undefined, grid);
       if (leapBonus > 0 && raw.x === 0 && raw.y > 0) {
         const extended = orientOffset(mover.owner, { x: 0, y: raw.y + leapBonus });
         tryAddMove(
@@ -192,6 +225,8 @@ function expandPattern(
           { x: mover.pos.x + extended.x, y: mover.pos.y + extended.y },
           mode,
           moves,
+          undefined,
+          grid,
         );
       }
     }
@@ -205,7 +240,7 @@ function expandPattern(
         x: mover.pos.x + dir.x * step,
         y: mover.pos.y + dir.y * step,
       };
-      const result = tryAddMove(state, mover.pos, to, mode, moves);
+      const result = tryAddMove(state, mover.pos, to, mode, moves, undefined, grid);
       if (result !== 'empty') break;
     }
   }
@@ -243,8 +278,11 @@ function applyMarshAuraCap(
   state: MatchState,
   mover: PieceInstance,
   moves: LegalMove[],
+  marshSlowed?: Set<string>,
 ): LegalMove[] {
-  if (!isMarshSlowed(state, mover)) return moves;
+  const slowed =
+    marshSlowed !== undefined ? marshSlowed.has(mover.id) : isMarshSlowed(state, mover);
+  if (!slowed) return moves;
   const def = getPieceDefinition(mover.defId);
   const cap = 1;
   if (def.baseRole === 'knight') return moves;
@@ -647,6 +685,7 @@ function dedupeMoves(moves: LegalMove[]): LegalMove[] {
 export function getLegalMovesForPiece(
   state: MatchState,
   piece: PieceInstance,
+  cache?: MoveGenCache,
 ): LegalMove[] {
   if (state.phase !== 'play') return [];
   if (piece.owner !== state.activePlayer) return [];
@@ -656,16 +695,17 @@ export function getLegalMovesForPiece(
   const def = getPieceDefinition(piece.defId);
   if (def.immobile) return [];
 
+  const grid = cache?.grid;
   const moves: LegalMove[] = [];
 
   if (def.freezeInsteadOfCapture) {
     for (const pattern of def.movement) {
-      moves.push(...expandPattern(state, piece, pattern, 'quiet'));
+      moves.push(...expandPattern(state, piece, pattern, 'quiet', grid));
     }
     addFreezeTargets(state, piece, moves);
   } else if (def.splitCapture && def.captureOffsets && !def.cannotCapture) {
     for (const pattern of def.movement) {
-      moves.push(...expandPattern(state, piece, pattern, 'quiet'));
+      moves.push(...expandPattern(state, piece, pattern, 'quiet', grid));
     }
     const leapBonus = mountainLeapBonus(state, piece);
     for (const raw of def.captureOffsets) {
@@ -674,12 +714,12 @@ export function getLegalMovesForPiece(
         offset = orientOffset(piece.owner, { x: 0, y: raw.y + leapBonus });
       }
       const to = { x: piece.pos.x + offset.x, y: piece.pos.y + offset.y };
-      tryAddMove(state, piece.pos, to, 'capture', moves);
+      tryAddMove(state, piece.pos, to, 'capture', moves, undefined, grid);
     }
   } else {
     const captureMode = def.cannotCapture ? 'quiet' : 'both';
     for (const pattern of def.movement) {
-      moves.push(...expandPattern(state, piece, pattern, captureMode));
+      moves.push(...expandPattern(state, piece, pattern, captureMode, grid));
     }
   }
 
@@ -690,7 +730,7 @@ export function getLegalMovesForPiece(
   addCastlingMoves(state, piece, moves);
   addRoyalEscortMoves(state, piece, moves);
 
-  const buffed = getBuffedPieceIds(state);
+  const buffed = cache?.buffed ?? getBuffedPieceIds(state);
   if (buffed.has(piece.id)) {
     addKingAuraMoves(state, piece, moves);
   }
@@ -704,13 +744,20 @@ export function getLegalMovesForPiece(
       piece,
       moves.filter((m) => !m.castle),
     ),
+    cache?.marshSlowed,
   );
   const castles = moves.filter((m) => m.castle);
   return dedupeMoves([...capped, ...castles]);
 }
 
 export function getAllLegalMoves(state: MatchState): LegalMove[] {
-  return state.pieces.flatMap((p) => getLegalMovesForPiece(state, p));
+  const cache = createMoveGenCache(state);
+  const out: LegalMove[] = [];
+  for (const p of state.pieces) {
+    const pieceMoves = getLegalMovesForPiece(state, p, cache);
+    if (pieceMoves.length > 0) out.push(...pieceMoves);
+  }
+  return out;
 }
 
 export function findLegalMove(

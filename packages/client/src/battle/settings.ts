@@ -1,8 +1,10 @@
 import type { PlayerId } from '@chessforge/engine';
 import type { ChooseOptions } from '@chessforge/ai';
 
-/** Slider level: 0 = weakest, 10 = maximum search power. */
+/** Discrete level: 0 = weakest, 10 = maximum search power (Lichess-style buttons). */
 export type AiStrengthLevel = number;
+
+export const AI_STRENGTH_LEVELS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10] as const;
 
 export type AiSearchProfile = {
   level: AiStrengthLevel;
@@ -17,12 +19,12 @@ export type AiSearchProfile = {
   ttBits: number;
 };
 
-const DEPTH_BY_LEVEL = [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 20] as const;
-const TIME_BY_LEVEL = [60, 100, 160, 260, 420, 700, 1_200, 2_200, 4_000, 8_000, 16_000] as const;
+const DEPTH_BY_LEVEL = [1, 2, 3, 4, 5, 6, 8, 10, 12, 14, 18] as const;
+const TIME_BY_LEVEL = [40, 60, 90, 130, 200, 320, 500, 800, 1_200, 1_800, 2_800] as const;
 const NODES_BY_LEVEL = [
-  1_200, 3_000, 8_000, 18_000, 40_000, 90_000, 200_000, 450_000, 1_000_000, 2_500_000, 8_000_000,
+  2_000, 5_000, 12_000, 30_000, 70_000, 150_000, 350_000, 800_000, 1_800_000, 4_000_000, 10_000_000,
 ] as const;
-const TT_BITS_BY_LEVEL = [12, 13, 14, 15, 16, 16, 17, 17, 18, 19, 20] as const;
+const TT_BITS_BY_LEVEL = [14, 14, 15, 15, 16, 16, 17, 18, 18, 19, 20] as const;
 
 export function clampAiStrength(level: number): AiStrengthLevel {
   if (!Number.isFinite(level)) return 5;
@@ -43,7 +45,7 @@ export function aiSearchProfile(level: number): AiSearchProfile {
       L === 0
         ? 'почти случайные ходы'
         : L === 10
-          ? `предельная мощность · до ~${seconds} · глубина ${maxDepth}`
+          ? `максимум · до ~${seconds} · глубина ${maxDepth}`
           : `думает до ~${seconds} · глубина ${maxDepth}`,
     maxDepth,
     timeMs,
@@ -51,6 +53,12 @@ export function aiSearchProfile(level: number): AiSearchProfile {
     skill: L,
     ttBits,
   };
+}
+
+function defaultAiWorkers(): number {
+  if (typeof navigator === 'undefined') return 2;
+  const n = navigator.hardwareConcurrency || 4;
+  return Math.max(2, Math.min(8, n));
 }
 
 export function aiChooseOptions(level: number): ChooseOptions {
@@ -61,6 +69,8 @@ export function aiChooseOptions(level: number): ChooseOptions {
     nodeLimit: p.nodeLimit,
     skill: p.skill,
     ttBits: p.ttBits,
+    workers: defaultAiWorkers(),
+    engine: 'stockfish',
   };
 }
 

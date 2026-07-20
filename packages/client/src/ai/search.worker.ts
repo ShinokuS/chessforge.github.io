@@ -54,6 +54,7 @@ export type WorkerResponse =
       results: Array<{ move: LegalMove; score: number }>;
       completed: boolean;
     }
+  | { id: number; type: 'searchProgress'; result: SearchResult }
   | { id: number; type: 'searchPosition'; result: SearchResult }
   | { id: number; type: 'scoreCommand'; score: number }
   | { id: number; type: 'scoreWhiteAfter'; score: number }
@@ -86,7 +87,14 @@ self.onmessage = (ev: MessageEvent<WorkerRequest>) => {
         break;
       }
       case 'searchPosition': {
-        const result = searchPosition(msg.state, msg.options);
+        const result = searchPosition(msg.state, msg.options, (partial) => {
+          const progress: WorkerResponse = {
+            id: msg.id,
+            type: 'searchProgress',
+            result: partial,
+          };
+          self.postMessage(progress);
+        });
         const res: WorkerResponse = { id: msg.id, type: 'searchPosition', result };
         self.postMessage(res);
         break;

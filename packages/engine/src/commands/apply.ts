@@ -3,8 +3,50 @@ import type { PlayerId } from '../board/types.js';
 import { findCavePartner, getTileDef, isPassable } from '../board/board.js';
 import { getPieceDefinition } from '../defs/catalog.js';
 import type { AbilityId, MatchState, PieceInstance } from '../match/types.js';
-import { findLegalMove, getLegalMovesForPiece } from '../pieces/movement.js';
+import { findLegalMove, getLegalMovesForPiece, type LegalMove } from '../pieces/movement.js';
 import type { ApplyResult, GameCommand, GameEvent } from './types.js';
+
+/** Search clone: isolated piece copies + shared board until a move mutates tiles. */
+function cloneStateForSearch(state: MatchState): MatchState {
+  return {
+    ...state,
+    board: state.board,
+    pieces: state.pieces.map(copyPieceFull),
+    extraMovePieceId: state.extraMovePieceId ?? null,
+    ...(state.skipFirstTurnUsed ? { skipFirstTurnUsed: { ...state.skipFirstTurnUsed } } : {}),
+    ...(state.openingSkipSequence
+      ? { openingSkipSequence: [...state.openingSkipSequence] }
+      : {}),
+  };
+}
+
+function copyPieceFull(p: PieceInstance): PieceInstance {
+  return {
+    ...p,
+    pos: { ...p.pos },
+    abilitiesUsed: { ...p.abilitiesUsed },
+    abilityCooldowns: { ...(p.abilityCooldowns ?? {}) },
+  };
+}
+
+function copyPieceAt(state: MatchState, index: number): PieceInstance {
+  const c = copyPieceFull(state.pieces[index]!);
+  state.pieces[index] = c;
+  return c;
+}
+
+function copyPieceById(state: MatchState, id: string): PieceInstance | undefined {
+  const index = state.pieces.findIndex((p) => p.id === id);
+  if (index < 0) return undefined;
+  return copyPieceAt(state, index);
+}
+
+function ensureMutableTiles(state: MatchState): void {
+  state.board = {
+    ...state.board,
+    tiles: state.board.tiles.map((row) => [...row]),
+  };
+}
 
 function cloneState(state: MatchState): MatchState {
   return {
@@ -174,6 +216,7 @@ function applyEnterTile(
 
   if (tile?.mushroomHeal) {
     piece.hp += 1;
+    ensureMutableTiles(state);
     const row = state.board.tiles[piece.pos.y];
     if (row) row[piece.pos.x] = 'plain';
     events.push({
@@ -341,11 +384,36 @@ function consumeAbility(
 }
 
 export function applyCommand(state: MatchState, command: GameCommand): ApplyResult {
+  return applyCommandImpl(state, command, null);
+}
+
+/** Apply a move already validated by movegen — skips findLegalMove and uses a search clone. */
+export function applyKnownMove(state: MatchState, move: LegalMove): ApplyResult {
+  const command: GameCommand = {
+    type: 'move',
+    from: { ...move.from },
+    to: { ...move.to },
+    ...(move.abilityId !== undefined ? { abilityId: move.abilityId } : {}),
+    ...(move.push ? { push: true } : {}),
+  };
+  return applyCommandImpl(state, command, move);
+}
+
+/** One-time clone at search root; in-place make/unmake mutates this copy. */
+export function cloneForSearch(state: MatchState): MatchState {
+  return cloneStateForSearch(state);
+}
+
+function applyCommandImpl(
+  state: MatchState,
+  command: GameCommand,
+  knownMove: LegalMove | null,
+): ApplyResult {
   if (state.phase !== 'play') {
     return { ok: false, code: 'wrong_phase', message: 'Match is not in play phase' };
   }
 
-  const next = cloneState(state);
+  const next = knownMove ? cloneStateForSearch(state) : cloneState(state);
   const events: GameEvent[] = [];
   let pendingFreezeCooldown: { pieceId: string; turns: number } | null = null;
   let pendingAbilityCooldown: {
@@ -356,47 +424,68 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
   let pendingPostMoveFreeze: { pieceId: string; turns: number } | null = null;
 
   if (command.type === 'endTurn') {
+    if (next.extraMovePieceId) {
+      const extraPiece = next.pieces.find((piece) => piece.id === next.extraMovePieceId);
+      if (extraPiece?.doubleMoveArmed) {
+        extraPiece.doubleMoveArmed = false;
+      }
+      next.extraMovePieceId = null;
+    }
     endTurn(next, events);
     maybeGameOver(next, events);
     return { ok: true, state: next, events };
   }
 
   if (command.type === 'move') {
-    const piece = next.pieces.find((p) => coordsEqual(p.pos, command.from));
-    if (!piece) {
+    const pieceIndex = next.pieces.findIndex((p) => coordsEqual(p.pos, command.from));
+    if (pieceIndex < 0) {
       return { ok: false, code: 'no_piece', message: 'No piece at source square' };
     }
+    let piece = knownMove ? copyPieceAt(next, pieceIndex) : next.pieces[pieceIndex]!;
     if (piece.owner !== next.activePlayer) {
       return { ok: false, code: 'not_your_turn', message: 'Piece does not belong to active player' };
     }
 
     let deferEndTurn = false;
-    const legal = findLegalMove(
-      next,
-      command.from,
-      command.to,
-      command.abilityId,
-      command.push,
-    );
-    const legalFallback = legal ?? findLegalMove(next, command.from, command.to);
-    if (!legalFallback) {
-      return { ok: false, code: 'illegal', message: 'Move is not legal' };
-    }
-    const chosen = command.abilityId
-      ? legalFallback.abilityId === command.abilityId
-        ? legalFallback
-        : findLegalMove(next, command.from, command.to, command.abilityId)
-      : command.push
-        ? legalFallback.push
+    let chosen: LegalMove;
+    if (knownMove) {
+      chosen = knownMove;
+    } else {
+      const legal = findLegalMove(
+        next,
+        command.from,
+        command.to,
+        command.abilityId,
+        command.push,
+      );
+      const legalFallback = legal ?? findLegalMove(next, command.from, command.to);
+      if (!legalFallback) {
+        return { ok: false, code: 'illegal', message: 'Move is not legal' };
+      }
+      const resolved = command.abilityId
+        ? legalFallback.abilityId === command.abilityId
           ? legalFallback
-          : findLegalMove(next, command.from, command.to, undefined, true)
-        : legalFallback;
-    if (!chosen) {
-      return { ok: false, code: 'illegal', message: 'Move is not legal' };
+          : findLegalMove(next, command.from, command.to, command.abilityId)
+        : command.push
+          ? legalFallback.push
+            ? legalFallback
+            : findLegalMove(next, command.from, command.to, undefined, true)
+          : legalFallback;
+      if (!resolved) {
+        return { ok: false, code: 'illegal', message: 'Move is not legal' };
+      }
+      chosen = resolved;
     }
     if (command.push && !chosen.push) {
       return { ok: false, code: 'illegal', message: 'Push is not legal' };
     }
+
+    const searchCow = knownMove !== null;
+    const mut = (p: PieceInstance): PieceInstance => {
+      if (!searchCow) return p;
+      const idx = next.pieces.findIndex((x) => x.id === p.id);
+      return idx >= 0 ? copyPieceAt(next, idx) : p;
+    };
 
     if (chosen.abilityId) {
       const consumed = consumeAbility(piece, chosen.abilityId, events);
@@ -407,7 +496,7 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       const rank = piece.pos.y;
       const rookFromX = chosen.castle === 'kingside' ? 7 : 0;
       const rookToX = chosen.castle === 'kingside' ? 5 : 3;
-      const rook = next.pieces.find(
+      let rook = next.pieces.find(
         (p) =>
           p.owner === piece.owner &&
           getPieceDefinition(p.defId).baseRole === 'rook' &&
@@ -418,6 +507,7 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       if (!rook) {
         return { ok: false, code: 'illegal', message: 'Castling rook not available' };
       }
+      rook = mut(rook);
 
       const kingFrom = { ...piece.pos };
       const rookFrom = { ...rook.pos };
@@ -573,6 +663,7 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
         turns: 4,
       });
     } else if (chosen.abilityId === 'spikeTile') {
+      ensureMutableTiles(next);
       const row = next.board.tiles[command.to.y];
       if (!row) {
         return { ok: false, code: 'illegal', message: 'Invalid tile' };
@@ -606,8 +697,9 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       const moverDef = getPieceDefinition(piece.defId);
 
       if (chosen.captures && chosen.targetPieceId) {
-        const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+        let target = next.pieces.find((p) => p.id === chosen.targetPieceId);
         if (target) {
+          target = mut(target);
           if (piece.cursedCannotHarmId && target.id === piece.cursedCannotHarmId) {
             return {
               ok: false,
@@ -789,4 +881,145 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
   }
 
   return { ok: false, code: 'illegal', message: 'Unknown command' };
+}
+
+/** Snapshot for in-place search make/unmake (zero alloc per node when fast path hits). */
+export type SearchUndo = {
+  pieces: PieceInstance[];
+  board: MatchState['board'];
+  activePlayer: PlayerId;
+  turn: number;
+  phase: MatchState['phase'];
+  winner: MatchState['winner'];
+  extraMovePieceId: string | null;
+  skipFirstTurnUsed?: MatchState['skipFirstTurnUsed'];
+};
+
+export function searchUnmake(state: MatchState, undo: SearchUndo): void {
+  state.pieces = undo.pieces;
+  state.board = undo.board;
+  state.activePlayer = undo.activePlayer;
+  state.turn = undo.turn;
+  state.phase = undo.phase;
+  state.winner = undo.winner;
+  state.extraMovePieceId = undo.extraMovePieceId;
+  if (undo.skipFirstTurnUsed !== undefined) {
+    state.skipFirstTurnUsed = undo.skipFirstTurnUsed;
+  } else {
+    delete state.skipFirstTurnUsed;
+  }
+}
+
+function snapBoard(board: MatchState['board']): MatchState['board'] {
+  return {
+    ...board,
+    tiles: board.tiles.map((row) => [...row]),
+  };
+}
+
+function snapSearch(state: MatchState): SearchUndo {
+  return {
+    pieces: state.pieces.map(copyPieceFull),
+    board: snapBoard(state.board),
+    activePlayer: state.activePlayer,
+    turn: state.turn,
+    phase: state.phase,
+    winner: state.winner,
+    extraMovePieceId: state.extraMovePieceId ?? null,
+    skipFirstTurnUsed: state.skipFirstTurnUsed
+      ? { ...state.skipFirstTurnUsed }
+      : undefined,
+  };
+}
+
+function applyEnterTileSearch(state: MatchState, piece: PieceInstance): void {
+  const tile = getTileDef(state.board, piece.pos);
+  if (!tile?.spikesDoom) {
+    piece.spikeArmed = false;
+    piece.spikeTicks = 0;
+  }
+  if (tile?.spikesDoom) {
+    piece.spikeArmed = true;
+    piece.spikeTicks = 0;
+  }
+  if (tile?.forestShield) {
+    piece.shieldTurns = Math.max(piece.shieldTurns ?? 0, 2);
+  }
+  if (tile?.mushroomHeal) {
+    piece.hp += 1;
+    ensureMutableTiles(state);
+    const row = state.board.tiles[piece.pos.y];
+    if (row) row[piece.pos.x] = 'plain';
+  }
+  if (tile?.windPush) {
+    piece.windPending = true;
+  } else {
+    piece.windPending = false;
+  }
+}
+
+const SEARCH_EVENTS: GameEvent[] = [];
+
+/** In-place quiet/lethal capture — returns null → caller uses applyKnownMove. */
+export function searchMakeMove(state: MatchState, move: LegalMove): SearchUndo | null {
+  if (state.phase !== 'play' || move.abilityId || move.push || move.castle) return null;
+
+  const moverIdx = state.pieces.findIndex((p) => coordsEqual(p.pos, move.from));
+  if (moverIdx < 0) return null;
+  if (state.pieces[moverIdx]!.owner !== state.activePlayer) return null;
+
+  const undo = snapSearch(state);
+  state.pieces = undo.pieces.map(copyPieceFull);
+  state.board = snapBoard(undo.board);
+
+  const piece = copyPieceAt(state, moverIdx);
+  const moverDef = getPieceDefinition(piece.defId);
+  if (moverDef.doubleMoveOnce && !piece.abilitiesUsed.doubleMove) {
+    searchUnmake(state, undo);
+    return null;
+  }
+
+  if (move.captures && move.targetPieceId) {
+    const tIdx = state.pieces.findIndex((p) => p.id === move.targetPieceId);
+    if (tIdx < 0) {
+      searchUnmake(state, undo);
+      return null;
+    }
+    const target = copyPieceAt(state, tIdx);
+    if (moverDef.freezeInsteadOfCapture || moverDef.attack <= 0) {
+      searchUnmake(state, undo);
+      return null;
+    }
+    if ((target.shieldTurns ?? 0) > 0) {
+      searchUnmake(state, undo);
+      return null;
+    }
+    target.hp -= moverDef.attack;
+    if (target.hp <= 0) {
+      state.pieces.splice(tIdx, 1);
+    } else {
+      searchUnmake(state, undo);
+      return null;
+    }
+  }
+
+  piece.pos = { ...move.to };
+  piece.hasMoved = true;
+  applyEnterTileSearch(state, piece);
+  tryPromote(state, piece, SEARCH_EVENTS);
+  maybeGameOver(state, SEARCH_EVENTS);
+  if (state.phase === 'play') {
+    resolveClericFrontBless(state, SEARCH_EVENTS);
+    endTurn(state, SEARCH_EVENTS);
+    maybeGameOver(state, SEARCH_EVENTS);
+  }
+  return undo;
+}
+
+export function searchMakeEndTurn(state: MatchState): SearchUndo | null {
+  if (state.phase !== 'play') return null;
+  const undo = snapSearch(state);
+  endTurn(state, SEARCH_EVENTS);
+  maybeGameOver(state, SEARCH_EVENTS);
+  return undo;
 }

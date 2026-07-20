@@ -15,6 +15,8 @@ export type MoveHistoryEntry = {
    * (`invisibleTurns > 0`). Owner always sees `text`.
    */
   cloakPieceId?: string;
+  /** Last segment ply when several half-moves merge into one cell (e.g. Wayfarer). */
+  endPly?: number;
 };
 
 export type HistoryTurnRow = {
@@ -156,8 +158,14 @@ export function groupHistoryForDisplay(entries: MoveHistoryEntry[]): HistoryDisp
   const assignSide = (row: HistoryTurnRow, e: MoveHistoryEntry) => {
     const key = e.player === 'white' ? 'white' : 'black';
     const prev = row[key];
-    // Safety: never overwrite — concatenate. Keep latest ply id for UI cursor.
-    row[key] = prev ? { ...e, text: `${prev.text} · ${e.text}` } : e;
+    // Same-side continuation: merge text; keep first ply for cursor, track endPly.
+    row[key] = prev
+      ? {
+          ...prev,
+          text: `${prev.text} · ${e.text}`,
+          endPly: e.ply,
+        }
+      : e;
   };
 
   for (const e of entries) {

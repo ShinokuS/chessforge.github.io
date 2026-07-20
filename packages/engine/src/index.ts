@@ -56,7 +56,8 @@ export {
 } from './defs/catalog.js';
 export { ROLE_LABELS } from './defs/pieces/basic.js';
 
-export { applyCommand, isRoyalPiece } from './commands/apply.js';
+export { applyCommand, applyKnownMove, cloneForSearch, isRoyalPiece, searchMakeMove, searchMakeEndTurn, searchUnmake } from './commands/apply.js';
+export type { SearchUndo } from './commands/apply.js';
 export type {
   GameCommand,
   GameEvent,
@@ -78,6 +79,10 @@ export {
   historyTextForViewer,
   historyForViewer,
 } from './match/history.js';
+export {
+  historyCursorInEntry,
+  historyCursorForEntry,
+} from './match/historyCursor.js';
 export type {
   MoveHistoryEntry,
   HistoryTurnRow,

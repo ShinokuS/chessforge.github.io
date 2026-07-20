@@ -50,6 +50,8 @@ export class OnlineGameSession {
   private hostPlacements: FormationPlacement[] | null = null;
   private isHost = false;
   private guestSeen = false;
+  private openingState: MatchState | null = null;
+  private recordedCommands: GameCommand[] = [];
 
   getState(): MatchState {
     return this.state;
@@ -78,6 +80,26 @@ export class OnlineGameSession {
   getLegalMovesFrom(from: { x: number; y: number }) {
     if (this.status !== 'playing') return [];
     return getLegalMoves(this.state, from);
+  }
+
+  /** Replay for save / analysis (both host and guest). */
+  getReplay(): { opening: MatchState; commands: GameCommand[] } | null {
+    if (!this.openingState) return null;
+    return {
+      opening: structuredClone(this.openingState),
+      commands: this.recordedCommands.map((c) => structuredClone(c)),
+    };
+  }
+
+  private beginReplay(state: MatchState): void {
+    this.openingState = structuredClone(state);
+    this.recordedCommands = [];
+  }
+
+  private recordCommand(command: GameCommand): void {
+    if (command.type === 'move' || command.type === 'endTurn') {
+      this.recordedCommands.push(structuredClone(command));
+    }
   }
 
   subscribe(listener: GameSessionListener): () => void {
@@ -171,6 +193,7 @@ export class OnlineGameSession {
       this.state = createMatchFromPlacements(white, black, seed);
       this.myColor = hostColor;
       this.lastError = null;
+      this.beginReplay(this.state);
       this.setStatus('playing');
       this.send({
         type: 'matchStart',
@@ -194,6 +217,7 @@ export class OnlineGameSession {
           : INITIAL_CLOCK_MS;
       this.state = createMatchFromPlacements(msg.white, msg.black, msg.seed);
       this.lastError = null;
+      this.beginReplay(this.state);
       this.setStatus('playing');
       this.emit([]);
       return;
@@ -212,6 +236,7 @@ export class OnlineGameSession {
         return;
       }
       this.state = result.state;
+      this.recordCommand(msg.command);
       this.lastError = null;
       this.send({ type: 'command', command: msg.command, by: guest });
       this.emit(result.events);
@@ -228,6 +253,7 @@ export class OnlineGameSession {
       }
       this.lastError = null;
       this.state = result.state;
+      this.recordCommand(msg.command);
       this.emit(result.events);
       return;
     }
@@ -357,6 +383,7 @@ export class OnlineGameSession {
         return false;
       }
       this.state = result.state;
+      this.recordCommand(command);
       this.lastError = null;
       this.send({ type: 'command', command, by: this.myColor });
       this.emit(result.events);
@@ -400,6 +427,8 @@ export class OnlineGameSession {
     this.hostSide = 'white';
     this.hostColor = 'white';
     this.matchClockMs = INITIAL_CLOCK_MS;
+    this.openingState = null;
+    this.recordedCommands = [];
     this.state = createDemoMatch();
     this.lastError = null;
     this.setStatus('idle');

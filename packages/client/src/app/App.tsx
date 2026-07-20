@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import styles from './App.module.css';
 import { useAppStore } from './store';
 import { applySiteTheme, readStoredTheme, SITE_THEMES, type SiteTheme } from './theme';
+import { AnalysisView } from '../analysis/AnalysisView';
 import { BattleView } from '../battle/BattleView';
 import { CollectionView } from '../collection/CollectionView';
 import { DeckBuilderView } from '../deck/DeckBuilderView';
@@ -48,6 +49,13 @@ export function App() {
             </button>
             <button
               type="button"
+              className={view === 'analysis' ? styles.active : undefined}
+              onClick={() => setView('analysis')}
+            >
+              Анализ
+            </button>
+            <button
+              type="button"
               className={view === 'collection' ? styles.active : undefined}
               onClick={() => setView('collection')}
             >
@@ -72,6 +80,7 @@ export function App() {
       </header>
       <main className={styles.main}>
         {view === 'battle' && <BattleView />}
+        {view === 'analysis' && <AnalysisView />}
         {view === 'collection' && <CollectionView />}
         {view === 'deck' && <DeckBuilderView />}
         {view === 'library' && <LibraryView />}

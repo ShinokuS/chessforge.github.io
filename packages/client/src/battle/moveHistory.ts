@@ -6,6 +6,8 @@ export {
   assignDisplayTurns,
   historyTextForViewer,
   historyForViewer,
+  historyCursorInEntry,
+  historyCursorForEntry,
   type MoveHistoryEntry,
   type HistoryTurnRow,
   type HistoryDisplayBlock,

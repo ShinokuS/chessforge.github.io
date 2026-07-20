@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "options": {
+    "maxDepth": 4,
+    "timeMs": 2000,
+    "nodeLimit": 300000,
+    "ttBits": 18
+  },
+  "gates": [
+    {
+      "case": "hanging-queen",
+      "minimumDepth": 3,
+      "bestTo": { "x": 0, "y": 4 }
+    },
+    {
+      "case": "royal-capture",
+      "minimumDepth": 1,
+      "bestTo": { "x": 0, "y": 4 }
+    }
+  ]
+}

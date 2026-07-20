@@ -1,0 +1,76 @@
+.wrap {
+  margin-top: 0;
+  padding: 0.45rem 0.55rem 0.35rem;
+  background: color-mix(in srgb, var(--bg0) 80%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-dim) 55%, transparent);
+  border-radius: 2px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.headTitle {
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.headScore {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+.svg {
+  width: 100%;
+  height: 64px;
+  display: block;
+  cursor: pointer;
+}
+
+.zero {
+  stroke: color-mix(in srgb, var(--muted) 40%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.area {
+  fill: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.line {
+  stroke: color-mix(in srgb, var(--accent) 75%, #c4b59a);
+  stroke-width: 1.7;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.cursor {
+  stroke: var(--accent);
+  stroke-width: 1.4;
+  opacity: 0.85;
+}
+
+.point {
+  fill: color-mix(in srgb, var(--ink) 70%, transparent);
+  pointer-events: none;
+}
+
+.pointActive {
+  fill: var(--accent);
+  pointer-events: none;
+}
+
+.pointMuted {
+  fill: color-mix(in srgb, var(--muted) 45%, transparent);
+  pointer-events: none;
+}

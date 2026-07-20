@@ -22,13 +22,87 @@ import {
   type TimePresetId,
 } from '../battle/settings';
 import {
-  analyzeGame,
-  type AnalyzedPly,
-} from '../battle/analyzeGame';
+  clampAnalysisDepth,
+  clampAnalysisThreads,
+  clampAnalysisTimeMs,
+  DEFAULT_ANALYSIS_DEPTH,
+  DEFAULT_ANALYSIS_TIME_MS,
+  defaultAnalysisThreads,
+  type AnalysisDepth,
+  type AnalysisThreads,
+  type AnalysisTimeMs,
+} from '../analysis/analysisSettings';
+import { type AnalyzedPly } from '../battle/analyzeGame';
 import { isArmableAbility, type ArmedAction } from '../battle/abilities';
+import { saveGameReplay, type SavedGame } from '../repositories/savedGames';
 
-export type AppView = 'battle' | 'collection' | 'deck' | 'library';
+export type AppView = 'battle' | 'analysis' | 'collection' | 'deck' | 'library';
 export type BattleMode = 'ai' | 'online';
+
+const STRENGTH_STORAGE_KEY = 'chessforge.engine-strength.v1';
+const ANALYSIS_ENGINE_STORAGE_KEY = 'chessforge.analysis-engine.v5';
+
+function readStoredAiStrength(): AiStrengthLevel {
+  try {
+    const raw = localStorage.getItem(STRENGTH_STORAGE_KEY);
+    if (!raw) return 6;
+    const parsed = JSON.parse(raw) as { ai?: number };
+    return clampAiStrength(parsed.ai ?? 6);
+  } catch {
+    return 6;
+  }
+}
+
+function writeStoredAiStrength(ai: AiStrengthLevel): void {
+  try {
+    localStorage.setItem(STRENGTH_STORAGE_KEY, JSON.stringify({ ai }));
+  } catch {
+    /* ignore */
+  }
+}
+
+type StoredAnalysisEngine = {
+  timeMs: AnalysisTimeMs;
+  depth: AnalysisDepth;
+  threads: AnalysisThreads;
+};
+
+function readStoredAnalysisEngine(): StoredAnalysisEngine {
+  try {
+    const raw = localStorage.getItem(ANALYSIS_ENGINE_STORAGE_KEY);
+    if (!raw) {
+      return {
+        timeMs: DEFAULT_ANALYSIS_TIME_MS,
+        depth: DEFAULT_ANALYSIS_DEPTH,
+        threads: defaultAnalysisThreads(),
+      };
+    }
+    const parsed = JSON.parse(raw) as {
+      timeMs?: number;
+      depth?: number;
+      threads?: number;
+    };
+    return {
+      timeMs: clampAnalysisTimeMs(parsed.timeMs ?? DEFAULT_ANALYSIS_TIME_MS),
+      depth: clampAnalysisDepth(parsed.depth ?? DEFAULT_ANALYSIS_DEPTH),
+      threads: clampAnalysisThreads(parsed.threads ?? defaultAnalysisThreads()),
+    };
+  } catch {
+    return {
+      timeMs: DEFAULT_ANALYSIS_TIME_MS,
+      depth: DEFAULT_ANALYSIS_DEPTH,
+      threads: defaultAnalysisThreads(),
+    };
+  }
+}
+
+function writeStoredAnalysisEngine(next: StoredAnalysisEngine): void {
+  try {
+    localStorage.setItem(ANALYSIS_ENGINE_STORAGE_KEY, JSON.stringify(next));
+  } catch {
+    /* ignore */
+  }
+}
 
 export type LastMoveHighlight = {
   from: Coord;
@@ -96,6 +170,15 @@ type AppStore = {
   aiPlaying: boolean;
   aiStrength: AiStrengthLevel;
   setAiStrength: (v: AiStrengthLevel) => void;
+  /** Analysis board max search time (ms). */
+  analysisTimeMs: AnalysisTimeMs;
+  setAnalysisTimeMs: (v: AnalysisTimeMs) => void;
+  /** Analysis board max search depth. */
+  analysisDepth: AnalysisDepth;
+  setAnalysisDepth: (v: AnalysisDepth) => void;
+  /** Analysis board worker threads (no upper cap). */
+  analysisThreads: AnalysisThreads;
+  setAnalysisThreads: (v: AnalysisThreads) => void;
   aiTimePreset: TimePresetId;
   setAiTimePreset: (v: TimePresetId) => void;
   onlineTimePreset: TimePresetId;
@@ -136,7 +219,11 @@ type AppStore = {
   resetClocks: (active: PlayerId | null, initialMs?: number) => void;
   tickClock: () => void;
   dismissEndBanner: () => void;
-  startGameAnalysis: () => Promise<void>;
+  /** Save finished AI/online game and open it on the Analysis tab. */
+  saveAndOpenAnalysis: () => SavedGame | null;
+  /** Analysis tab loads this saved game id once, then clears. */
+  pendingAnalysisId: string | null;
+  consumePendingAnalysisId: () => string | null;
   setAnalysisCursor: (cursor: number) => void;
   clearAnalysis: () => void;
   resign: () => void;
@@ -273,13 +360,56 @@ export const useAppStore = create<AppStore>((set, get) => {
     });
   });
 
+  const storedAnalysis = readStoredAnalysisEngine();
+
   return {
     view: 'battle',
     setView: (view) => set({ view }),
     battleMode: initialRoom ? 'online' : 'ai',
     aiPlaying: false,
-    aiStrength: 6,
-    setAiStrength: (aiStrength) => set({ aiStrength: clampAiStrength(aiStrength) }),
+    pendingAnalysisId: null,
+    consumePendingAnalysisId: () => {
+      const id = get().pendingAnalysisId;
+      if (id) set({ pendingAnalysisId: null });
+      return id;
+    },
+    aiStrength: readStoredAiStrength(),
+    setAiStrength: (aiStrength) => {
+      const next = clampAiStrength(aiStrength);
+      writeStoredAiStrength(next);
+      get().session.setAiStrength(next);
+      set({ aiStrength: next });
+    },
+    analysisTimeMs: storedAnalysis.timeMs,
+    setAnalysisTimeMs: (analysisTimeMs) => {
+      const next = clampAnalysisTimeMs(analysisTimeMs);
+      writeStoredAnalysisEngine({
+        timeMs: next,
+        depth: get().analysisDepth,
+        threads: get().analysisThreads,
+      });
+      set({ analysisTimeMs: next });
+    },
+    analysisDepth: storedAnalysis.depth,
+    setAnalysisDepth: (analysisDepth) => {
+      const next = clampAnalysisDepth(analysisDepth);
+      writeStoredAnalysisEngine({
+        timeMs: get().analysisTimeMs,
+        depth: next,
+        threads: get().analysisThreads,
+      });
+      set({ analysisDepth: next });
+    },
+    analysisThreads: storedAnalysis.threads,
+    setAnalysisThreads: (analysisThreads) => {
+      const next = clampAnalysisThreads(analysisThreads);
+      writeStoredAnalysisEngine({
+        timeMs: get().analysisTimeMs,
+        depth: get().analysisDepth,
+        threads: next,
+      });
+      set({ analysisThreads: next });
+    },
     aiTimePreset: '10',
     setAiTimePreset: (aiTimePreset) => set({ aiTimePreset }),
     onlineTimePreset: '10',
@@ -420,69 +550,36 @@ export const useAppStore = create<AppStore>((set, get) => {
       });
       o.resign();
     },
-    startGameAnalysis: async () => {
-      const { session: s, battleMode } = get();
-      if (battleMode !== 'ai') return;
-      const replay = s.getReplay();
+    saveAndOpenAnalysis: () => {
+      const { session: s, online: o, battleMode, state, endBanner } = get();
+      const source = battleMode === 'online' ? 'online' : 'ai';
+      const active = battleMode === 'online' ? o : s;
+      const replay = active.getReplay();
       if (!replay || replay.commands.length === 0) {
-        set({
-          analysis: {
-            ...idleAnalysis(),
-            status: 'error',
-            error: 'Нет ходов для анализа',
-          },
-          endBanner: null,
-          aiPlaying: true,
-        });
-        return;
+        return null;
       }
+      const winner =
+        state.winner ??
+        endBanner?.winner ??
+        (state.phase === 'gameOver' ? state.winner : null) ??
+        null;
+      const saved = saveGameReplay({
+        source,
+        opening: replay.opening,
+        commands: replay.commands,
+        winner,
+        myColor: battleMode === 'online' ? o.getMyColor() : 'white',
+      });
       set({
         endBanner: null,
-        aiPlaying: true,
         selected: null,
-        analysis: {
-          status: 'running',
-          progress: { done: 0, total: replay.commands.length },
-          plies: [],
-          positions: [structuredClone(replay.opening)],
-          cursor: 0,
-          error: null,
-        },
+        abilityArmed: null,
+        analysis: idleAnalysis(),
+        pendingAnalysisId: saved.id,
+        view: 'analysis',
+        ...(battleMode === 'ai' ? { aiPlaying: true } : {}),
       });
-      try {
-        const { plies, positions } = await analyzeGame(
-          replay.opening,
-          replay.commands,
-          undefined,
-          (p) => {
-            set({
-              analysis: {
-                ...get().analysis,
-                status: 'running',
-                progress: p,
-              },
-            });
-          },
-        );
-        set({
-          analysis: {
-            status: 'done',
-            progress: { done: plies.length, total: plies.length },
-            plies,
-            positions,
-            cursor: Math.max(0, positions.length - 1),
-            error: null,
-          },
-        });
-      } catch (err) {
-        set({
-          analysis: {
-            ...idleAnalysis(),
-            status: 'error',
-            error: err instanceof Error ? err.message : 'Ошибка анализа',
-          },
-        });
-      }
+      return saved;
     },
     setAnalysisCursor: (cursor) => {
       const { analysis } = get();

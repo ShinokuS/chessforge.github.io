@@ -960,6 +960,31 @@ describe('new piece mods', () => {
     expect(second.state.activePlayer).toBe('black');
   });
 
+  it('wayfarer may decline its optional second move with endTurn', () => {
+    const state = blankMatch([
+      createPieceInstance('wayfarer', 'white', { x: 2, y: 2 }, 'wb'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const first = applyCommand(state, {
+      type: 'move',
+      from: { x: 2, y: 2 },
+      to: { x: 4, y: 4 },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const passed = applyCommand(first.state, { type: 'endTurn' });
+    expect(passed.ok).toBe(true);
+    if (!passed.ok) return;
+    const wayfarer = passed.state.pieces.find((piece) => piece.id === 'wb');
+    expect(passed.state.activePlayer).toBe('black');
+    expect(passed.state.extraMovePieceId).toBeNull();
+    expect(wayfarer?.doubleMoveArmed).toBe(false);
+    expect(wayfarer?.abilitiesUsed.doubleMove).toBeFalsy();
+    expect(wayfarer?.frozenTurns).toBe(0);
+  });
+
   it('thornqueen places spikes once per match', () => {
     const state = blankMatch([
       createPieceInstance('thornqueen', 'white', { x: 3, y: 0 }, 'tq'),

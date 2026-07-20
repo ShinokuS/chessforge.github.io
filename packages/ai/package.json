@@ -11,11 +11,15 @@
       "import": "./dist/index.js"
     }
   },
+  "bin": {
+    "chessforge-ai-bench": "./dist/benchCli.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench": "node dist/benchCli.js --compare-legacy"
   },
   "dependencies": {
     "@chessforge/engine": "workspace:*"

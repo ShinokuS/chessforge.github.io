@@ -6,7 +6,7 @@ import {
   applyCommand,
   resetPieceIdCounter,
 } from '../src/index.js';
-import { formatEventsToHistory, appendHistoryFromEvents, groupHistoryForDisplay, assignDisplayTurns, historyTextForViewer } from '../src/index.js';
+import { formatEventsToHistory, appendHistoryFromEvents, groupHistoryForDisplay, assignDisplayTurns, historyTextForViewer, historyCursorInEntry, historyCursorForEntry } from '../src/index.js';
 
 function blank(pieces: ReturnType<typeof createPieceInstance>[]) {
   resetPieceIdCounter(1);
@@ -227,6 +227,36 @@ describe('formatEventsToHistory', () => {
     expect(assignDisplayTurns(['white', 'white', 'black'])).toEqual([1, 1, 1]);
     expect(assignDisplayTurns(['white', 'black', 'white', 'black'])).toEqual([1, 1, 2, 2]);
     expect(assignDisplayTurns(['black', 'white', 'black'])).toEqual([1, 2, 2]);
+  });
+
+  it('merged wayfarer plies keep first ply + endPly for cursor highlight', () => {
+    const merged = groupHistoryForDisplay([
+      {
+        ply: 1,
+        turn: 1,
+        player: 'white',
+        text: 'Странник c3→e5',
+        kind: 'ply',
+      },
+      {
+        ply: 2,
+        turn: 1,
+        player: 'white',
+        text: 'e5→g7',
+        kind: 'ply',
+      },
+    ]);
+    expect(merged).toHaveLength(1);
+    if (merged[0]?.type !== 'turn') return;
+    const white = merged[0].row.white;
+    expect(white?.ply).toBe(1);
+    expect(white?.endPly).toBe(2);
+    expect(white?.text).toMatch(/c3→e5/);
+    expect(white?.text).toMatch(/e5→g7/);
+    expect(historyCursorInEntry(1, white)).toBe(true);
+    expect(historyCursorInEntry(2, white)).toBe(true);
+    expect(historyCursorInEntry(3, white)).toBe(false);
+    expect(historyCursorForEntry(white!)).toBe(2);
   });
 
   it('hides cloaked pawn moves from the opponent until the cloak expires', () => {
