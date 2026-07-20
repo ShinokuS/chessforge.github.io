@@ -53,7 +53,7 @@ export type ChooseOptions = {
 };
 
 function moveKey(m: LegalMove): string {
-  return `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.abilityId ?? ''}:${m.captures ? 1 : 0}`;
+  return `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.abilityId ?? ''}:${m.captures ? 1 : 0}:${m.push ? 1 : 0}`;
 }
 
 function moveToCommand(m: LegalMove): GameCommand {
@@ -62,6 +62,7 @@ function moveToCommand(m: LegalMove): GameCommand {
     from: { ...m.from },
     to: { ...m.to },
     ...(m.abilityId !== undefined ? { abilityId: m.abilityId } : {}),
+    ...(m.push ? { push: true } : {}),
   };
 }
 
@@ -80,8 +81,8 @@ function shouldStop(ctx: SearchContext): boolean {
 
 function isQuietTactical(m: LegalMove, state: MatchState): boolean {
   if (m.captures) return true;
-  // Freeze-style "captures" already flagged; also prioritize cave warps / abilities.
-  if (m.abilityId) return true;
+  // Freeze-style "captures" already flagged; also prioritize cave warps / abilities / ram.
+  if (m.abilityId || m.push) return true;
   const piece = state.pieces.find(
     (p) => p.pos.x === m.from.x && p.pos.y === m.from.y,
   );

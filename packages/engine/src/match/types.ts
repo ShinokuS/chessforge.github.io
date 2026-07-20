@@ -11,7 +11,13 @@ export type AbilityId =
   | 'blessHeal'
   | 'abdicate'
   | 'grantShield'
-  | 'designatePromote';
+  | 'designatePromote'
+  | 'frontBless'
+  | 'curseEnemy'
+  | 'spikeTile'
+  | 'cloakPawn'
+  | 'judgeBless'
+  | 'doubleMove';
 
 export type TileDefinition = {
   id: TileId;
@@ -104,6 +110,18 @@ export type PieceDefinition = {
     directions: ReadonlyArray<Coord>;
     maxRange: number;
   };
+  /** Chebyshev radius: enemy pieces move as if on mud (movementCap 1). */
+  marshAuraRadius?: number;
+  /** Side skips its first turn if this piece is in the deck. */
+  skipFirstTurn?: boolean;
+  /** After a normal move, skip this many own turns. */
+  postMoveFreezeTurns?: number;
+  /** If a friendly king is adjacent, also generate king-step moves. */
+  royalEscort?: boolean;
+  /** Once per match: after moving, may move again; then frozen `freezeAfter` turns. */
+  doubleMoveOnce?: { freezeAfter: number };
+  /** Can transform plain tiles into spikes (once per match via spikeTile). */
+  spikePlacer?: boolean;
   abilities?: ReadonlyArray<{
     id: AbilityId;
     description: string;
@@ -152,6 +170,12 @@ export type PieceInstance = {
   reflectAvailable: boolean;
   /** Designated by patron queen: promotes to base queen on last rank. */
   promotesToBaseQueen: boolean;
+  /** Cannot damage the piece with this id (bishop curse). */
+  cursedCannotHarmId?: string;
+  /** Opponent-side invisibility ticks (half-turns hidden from enemy UI). */
+  invisibleTurns?: number;
+  /** First leg of a double-move ability completed; must move again this turn. */
+  doubleMoveArmed?: boolean;
 };
 
 export type MatchPhase = 'play' | 'gameOver';
@@ -182,6 +206,12 @@ export type MatchState = {
   winner: PlayerId | null;
   seed: number;
   rngStep: number;
+  /** Only this piece may move until it completes a double-move sequence. */
+  extraMovePieceId?: string | null;
+  /** Whether a side already consumed automatic first-turn skip. */
+  skipFirstTurnUsed?: Partial<Record<PlayerId, boolean>>;
+  /** If at match start one or both sides auto-skipped their first turn. */
+  openingSkipSequence?: PlayerId[];
 };
 
 /** Soft cap for deck: only modifications spend budget; bases are free. */

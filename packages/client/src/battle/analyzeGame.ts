@@ -69,9 +69,12 @@ function sq(x: number, y: number): string {
 }
 
 export function formatMoveCommand(state: MatchState, cmd: GameCommand): string {
-  if (cmd.type !== 'move') return cmd.type;
+  if (cmd.type === 'endTurn') return 'Закончить ход';
   const piece = state.pieces.find((p) => p.pos.x === cmd.from.x && p.pos.y === cmd.from.y);
   const name = piece ? getPieceDefinition(piece.defId).name : 'фигура';
+  if (cmd.push) {
+    return `Таран ${name} → ${sq(cmd.to.x, cmd.to.y)}`;
+  }
   const ability =
     cmd.abilityId === 'retreat'
       ? ' (отступление)'
@@ -101,7 +104,8 @@ function commandsEqual(a: GameCommand, b: GameCommand): boolean {
       a.from.y === b.from.y &&
       a.to.x === b.to.x &&
       a.to.y === b.to.y &&
-      (a.abilityId ?? '') === (b.abilityId ?? '')
+      (a.abilityId ?? '') === (b.abilityId ?? '') &&
+      Boolean(a.push) === Boolean(b.push)
     );
   }
   return JSON.stringify(a) === JSON.stringify(b);
@@ -129,11 +133,23 @@ export async function analyzeGame(
   const plies: AnalyzedPly[] = [];
   const positions: MatchState[] = [structuredClone(opening)];
   let state = structuredClone(opening);
-  const moveCmds = commands.filter((c) => c.type === 'move');
 
-  for (let i = 0; i < moveCmds.length; i++) {
-    const played = moveCmds[i]!;
+  // Include endTurn so deferred extra-moves replay correctly; only score real moves.
+  const scoredTotal = commands.filter((c) => c.type === 'move').length;
+  let scoredDone = 0;
+
+  for (const played of commands) {
     if (state.phase !== 'play') break;
+
+    if (played.type === 'endTurn') {
+      const after = applyCommand(state, played);
+      if (!after.ok) break;
+      state = after.state;
+      // Do not push positions — keeps plies[i] aligned with positions[i + 1].
+      continue;
+    }
+
+    if (played.type !== 'move') continue;
 
     const player = state.activePlayer;
     const playedLabel = formatMoveCommand(state, played);
@@ -141,7 +157,9 @@ export async function analyzeGame(
     const root = await pool.searchPosition(state, options);
     const best = root.best;
     const bestLabel =
-      best.type === 'move' ? formatMoveCommand(state, best) : formatMoveCommand(state, played);
+      best.type === 'move' || best.type === 'endTurn'
+        ? formatMoveCommand(state, best)
+        : formatMoveCommand(state, played);
     const sameAsBest = commandsEqual(played, best);
 
     const bestScoreStm = root.score;
@@ -160,8 +178,9 @@ export async function analyzeGame(
       ? evalAfter
       : await pool.searchScoreWhiteAfter(state, best, options);
 
+    scoredDone += 1;
     plies.push({
-      ply: i + 1,
+      ply: scoredDone,
       player,
       played,
       best,
@@ -177,7 +196,7 @@ export async function analyzeGame(
 
     state = afterPlayed.state;
     positions.push(structuredClone(state));
-    onProgress?.({ done: i + 1, total: moveCmds.length });
+    onProgress?.({ done: scoredDone, total: scoredTotal });
   }
 
   return { plies, positions };

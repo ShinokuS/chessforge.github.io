@@ -302,6 +302,31 @@
   z-index: 1;
 }
 
+.canAbility::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 34%;
+  height: 34%;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: color-mix(in srgb, #7eb8ff 55%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, #7eb8ff 75%, white);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.cloakedMine .piece {
+  opacity: 0.45;
+  filter: drop-shadow(0 0 4px rgba(126, 184, 255, 0.55));
+}
+
+.cursed {
+  box-shadow: inset 0 0 0 3px
+    color-mix(in srgb, #e26bff 52%, transparent);
+}
+
 .piece {
   position: relative;
   z-index: 2;
@@ -394,5 +419,119 @@
 
 .inspectIdle {
   color: var(--muted);
+}
+
+.abilityArm {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg2));
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.abilityArmTitle {
+  margin: 0 !important;
+  font-family: var(--font-display);
+  font-size: 1.05rem !important;
+  color: var(--ink) !important;
+}
+
+.abilityArmHint {
+  margin: 0 !important;
+  font-size: 0.82rem !important;
+  color: var(--muted) !important;
+  line-height: 1.35;
+}
+
+.abilityToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.abilityToggleLabel {
+  font-size: 0.92rem;
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.switchOff,
+.switchOn {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.6rem;
+  height: 1.4rem;
+  border-radius: 2px;
+  border: 1px solid var(--accent-dim);
+  padding: 0;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease;
+}
+
+.switchOff {
+  background: var(--bg0);
+}
+
+.switchOn {
+  background: color-mix(in srgb, var(--accent) 55%, var(--bg2));
+  border-color: var(--accent);
+}
+
+.switchKnob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1rem;
+  height: calc(100% - 4px);
+  background: var(--ink);
+  border-radius: 1px;
+  transition: transform 140ms ease, background 140ms ease;
+  pointer-events: none;
+}
+
+.switchOn .switchKnob {
+  transform: translateX(1.15rem);
+  background: var(--bg0);
+}
+
+/* Hover aura (Chebyshev radius) — frame overlay */
+.auraMarsh::after,
+.auraFreeze::after,
+.auraHeal::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  pointer-events: none;
+  z-index: 1;
+  border-radius: 1px;
+}
+
+.auraMarsh::after {
+  border: 2px solid color-mix(in srgb, #6b8f3c 75%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #6b8f3c 25%, transparent);
+  background: color-mix(in srgb, #6b8f3c 14%, transparent);
+}
+
+.auraFreeze::after {
+  border: 2px solid color-mix(in srgb, #5a9ec4 80%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #5a9ec4 28%, transparent);
+  background: color-mix(in srgb, #5a9ec4 16%, transparent);
+}
+
+.auraHeal::after {
+  border: 2px solid color-mix(in srgb, #c4a35a 80%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #c4a35a 28%, transparent);
+  background: color-mix(in srgb, #c4a35a 14%, transparent);
+}
+
+.auraHint {
+  margin: 0.45rem 0 0 !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+  font-size: 0.88rem !important;
 }
 

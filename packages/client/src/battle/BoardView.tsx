@@ -1,13 +1,23 @@
 import { useState, type ReactNode } from 'react';
 import styles from './BoardView.module.css';
 import {
+  getPieceAuraOverlay,
   getPieceDefinition,
   getTileDefinition,
   getTileId,
+  isPieceMarshSlowed,
   type Coord,
 } from '@chessforge/engine';
 import { useAppStore } from '../app/store';
 import { PieceIcon } from './PieceIcon';
+import {
+  ABILITY_LABEL,
+  actionLabel,
+  availableArmableActions,
+  filterMovesForAbilityArm,
+  legalMapFromMoves,
+  type ArmedAction,
+} from './abilities';
 
 const TILE_MARK: Record<string, string> = {
   mud: '≈',
@@ -20,21 +30,12 @@ const TILE_MARK: Record<string, string> = {
   mushroom: '✦',
 };
 
-const ABILITY_LABEL: Record<string, string> = {
-  retreat: 'Отступление',
-  royalWarp: 'Телепорт к носителю титула',
-  allyLeap: 'Прыжок через союзника',
-  allySwap: 'Обмен с союзником',
-  blessHeal: 'Благословение (+1 HP)',
-  abdicate: 'Передача титула',
-  grantShield: 'Эгида (щит)',
-  designatePromote: 'Назначение пешки',
-};
-
 export function BoardView() {
   const liveState = useAppStore((s) => s.state);
   const analysis = useAppStore((s) => s.analysis);
   const selected = useAppStore((s) => s.selected);
+  const abilityArmed = useAppStore((s) => s.abilityArmed);
+  const setAbilityArmed = useAppStore((s) => s.setAbilityArmed);
   const liveLastMove = useAppStore((s) => s.lastMove);
   const setSelected = useAppStore((s) => s.setSelected);
   const submitMove = useAppStore((s) => s.submitMove);
@@ -51,7 +52,7 @@ export function BoardView() {
       ? analysis.positions[analysis.cursor]!
       : liveState;
 
-  const lastMove = (() => {
+  const lastMoveRaw = (() => {
     if (!reviewing || analysis.cursor <= 0) return reviewing ? null : liveLastMove;
     const ply = analysis.plies[analysis.cursor - 1];
     if (!ply || ply.played.type !== 'move') return null;
@@ -60,11 +61,43 @@ export function BoardView() {
 
   const activeSession = battleMode === 'online' ? online : session;
   const myColor = battleMode === 'online' ? online.getMyColor() : 'white';
-  const legal =
+
+  // Don't flash from/to of an enemy cloaked pawn — that would reveal its path.
+  const lastMove = (() => {
+    if (!lastMoveRaw || !myColor) return lastMoveRaw;
+    const atTo = state.pieces.find(
+      (p) => p.pos.x === lastMoveRaw.to.x && p.pos.y === lastMoveRaw.to.y,
+    );
+    if (
+      atTo &&
+      atTo.owner !== myColor &&
+      (atTo.invisibleTurns ?? 0) > 0
+    ) {
+      return null;
+    }
+    return lastMoveRaw;
+  })();
+  const allLegal =
     selected && !endBanner && !reviewing ? activeSession.getLegalMovesFrom(selected) : [];
-  const legalMap = new Map(legal.map((m) => [`${m.to.x},${m.to.y}`, m]));
+  const armableIds = availableArmableActions(allLegal);
+  const legal = filterMovesForAbilityArm(allLegal, abilityArmed);
+  const legalMap = legalMapFromMoves(legal);
+
+  const selectedPiece = selected
+    ? state.pieces.find((p) => p.pos.x === selected.x && p.pos.y === selected.y)
+    : undefined;
+  const showAbilityArm =
+    Boolean(selectedPiece) &&
+    canControl(selectedPiece!.owner) &&
+    armableIds.length > 0 &&
+    !reviewing &&
+    !endBanner;
 
   const aiPlaying = useAppStore((s) => s.aiPlaying);
+
+  const onToggleAbility = (id: ArmedAction) => {
+    setAbilityArmed(abilityArmed === id ? null : id);
+  };
 
   const onCellClick = (pos: Coord) => {
     if (reviewing || endBanner || state.phase !== 'play') return;
@@ -79,11 +112,22 @@ export function BoardView() {
 
     const move = legalMap.get(`${pos.x},${pos.y}`);
     if (selected && move) {
-      submitMove(pos);
+      submitMove(pos, move.abilityId);
       return;
     }
 
-    const piece = state.pieces.find((p) => p.pos.x === pos.x && p.pos.y === pos.y);
+    const clickedPiece = state.pieces.find((p) => p.pos.x === pos.x && p.pos.y === pos.y);
+    if (selected && clickedPiece && abilityArmed) {
+      const targetAbility = legal.find(
+        (m) => m.abilityId === abilityArmed && m.targetPieceId === clickedPiece.id,
+      );
+      if (targetAbility?.abilityId) {
+        submitMove(pos, targetAbility.abilityId);
+        return;
+      }
+    }
+
+    const piece = clickedPiece;
     if (piece && canControl(piece.owner)) {
       setSelected(pos);
       return;
@@ -94,6 +138,27 @@ export function BoardView() {
   const { width, height } = state.board;
   const flip = myColor === 'black';
   const cells: ReactNode[] = [];
+
+  const hoverTileId = hovered
+    ? (getTileId(state.board, hovered) ?? 'plain')
+    : null;
+  const hoverTile = hoverTileId ? getTileDefinition(hoverTileId) : null;
+  const hoverPiece = hovered
+    ? state.pieces.find((p) => p.pos.x === hovered.x && p.pos.y === hovered.y)
+    : null;
+  const hoverDef = hoverPiece ? getPieceDefinition(hoverPiece.defId) : null;
+  const hoverAura = hoverPiece ? getPieceAuraOverlay(hoverPiece, state.board) : null;
+  const auraKeys = hoverAura
+    ? new Set(hoverAura.cells.map((c) => `${c.x},${c.y}`))
+    : null;
+  const auraClass =
+    hoverAura?.kind === 'marsh'
+      ? styles.auraMarsh
+      : hoverAura?.kind === 'freeze'
+        ? styles.auraFreeze
+        : hoverAura?.kind === 'heal'
+          ? styles.auraHeal
+          : '';
 
   const yOrder = flip
     ? Array.from({ length: height }, (_, i) => i)
@@ -116,6 +181,13 @@ export function BoardView() {
       const spiked = Boolean(piece?.spikeArmed);
       const frozen = (piece?.frozenTurns ?? 0) > 0;
       const shielded = (piece?.shieldTurns ?? 0) > 0;
+      const cloaked = (piece?.invisibleTurns ?? 0) > 0;
+      const cursed = Boolean(piece?.cursedCannotHarmId);
+      const hiddenFromMe = Boolean(
+        piece && cloaked && piece.owner !== myColor && !reviewing,
+      );
+      const cloakedMine = Boolean(piece && cloaked && piece.owner === myColor);
+      const inAura = Boolean(auraKeys?.has(`${x},${y}`));
 
       const classNames = [
         styles.cell,
@@ -130,11 +202,15 @@ export function BoardView() {
         tileId === 'mushroom' ? styles.mushroom : '',
         isSelected ? styles.selected : '',
         isLastFrom || isLastTo ? styles.lastMove : '',
-        move && !move.captures ? styles.canMove : '',
+        move?.abilityId || move?.push ? styles.canAbility : '',
+        move && !move.captures && !move.abilityId && !move.push ? styles.canMove : '',
         move?.captures ? styles.canCapture : '',
         spiked ? styles.spikeDoom : '',
         frozen ? styles.freezeDoom : '',
         shielded ? styles.shieldAura : '',
+        cursed ? styles.cursed : '',
+        cloakedMine ? styles.cloakedMine : '',
+        inAura ? auraClass : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -150,7 +226,7 @@ export function BoardView() {
           onFocus={() => setHovered(pos)}
           aria-label={`${tileDef.name}, клетка ${x},${y}`}
         >
-          {piece && (
+          {piece && !hiddenFromMe && (
             <PieceIcon defId={piece.defId} owner={piece.owner} className={styles.piece} />
           )}
           {tileId !== 'plain' && (
@@ -160,15 +236,6 @@ export function BoardView() {
       );
     }
   }
-
-  const hoverTileId = hovered
-    ? (getTileId(state.board, hovered) ?? 'plain')
-    : null;
-  const hoverTile = hoverTileId ? getTileDefinition(hoverTileId) : null;
-  const hoverPiece = hovered
-    ? state.pieces.find((p) => p.pos.x === hovered.x && p.pos.y === hovered.y)
-    : null;
-  const hoverDef = hoverPiece ? getPieceDefinition(hoverPiece.defId) : null;
 
   return (
     <div className={styles.wrap}>
@@ -183,10 +250,48 @@ export function BoardView() {
       </div>
 
       <aside className={styles.inspect} aria-live="polite">
+        {showAbilityArm && (
+          <div className={styles.abilityArm}>
+            <p className={styles.abilityArmTitle}>Способность</p>
+            <p className={styles.abilityArmHint}>
+              {abilityArmed
+                ? 'Выберите цель способности на доске.'
+                : 'Включите, чтобы применить вместо обычного хода.'}
+            </p>
+            {armableIds.map((id) => {
+              const on = abilityArmed === id;
+              return (
+                <label key={id} className={styles.abilityToggle}>
+                  <span className={styles.abilityToggleLabel}>{actionLabel(id)}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={on}
+                    className={on ? styles.switchOn : styles.switchOff}
+                    onClick={() => onToggleAbility(id)}
+                  >
+                    <span className={styles.switchKnob} />
+                  </button>
+                </label>
+              );
+            })}
+          </div>
+        )}
+
         {hoverTile ? (
           <>
             <h3>{hoverTile.name}</h3>
             <p>{hoverTile.description}</p>
+            {hoverAura && (
+              <p className={styles.auraHint}>
+                {hoverAura.kind === 'marsh' &&
+                  `Аура топи: радиус ${hoverAura.radius} (враги замедлены)`}
+                {hoverAura.kind === 'freeze' &&
+                  `Зона заморозки: радиус ${hoverAura.radius}`}
+                {hoverAura.kind === 'heal' &&
+                  `Зона лечения: радиус ${hoverAura.radius}`}
+              </p>
+            )}
             {hoverPiece?.spikeArmed && (
               <p className={styles.warn}>
                 {hoverPiece.spikeTicks >= 1
@@ -196,6 +301,11 @@ export function BoardView() {
             )}
             {(hoverPiece?.frozenTurns ?? 0) > 0 && (
               <p className={styles.warn}>Заморожена: не может ходить в этот ход.</p>
+            )}
+            {hoverPiece && isPieceMarshSlowed(state, hoverPiece) && (
+              <p className={styles.warn}>
+                Эффект Топи: ход ограничен одной клеткой (как на топи).
+              </p>
             )}
             {(hoverPiece?.shieldTurns ?? 0) > 0 && (
               <p className={styles.warn}>Щит леса: неуязвима к ударам и заморозке.</p>
@@ -208,6 +318,16 @@ export function BoardView() {
             {hoverPiece?.windPending && (
               <p className={styles.warn}>
                 Ветер: после хода противника будет снос назад, если клетка свободна.
+              </p>
+            )}
+            {hoverPiece && (hoverPiece.invisibleTurns ?? 0) > 0 && (
+              <p className={styles.warn}>
+                Невидима для соперника ещё {hoverPiece.invisibleTurns} полуход(а).
+              </p>
+            )}
+            {hoverPiece?.cursedCannotHarmId && (
+              <p className={styles.warn}>
+                Проклятие: эта фигура не может вредить указанному слону.
               </p>
             )}
             {hoverPiece && hoverDef && (

@@ -3,7 +3,7 @@ import styles from './BattleView.module.css';
 import { BoardView } from './BoardView';
 import { formatClock } from './clock';
 import { formatEvalCp, judgmentLabel, type AnalyzedPly, type MoveJudgment } from './analyzeGame';
-import { groupHistoryForDisplay } from './moveHistory';
+import { assignDisplayTurns, groupHistoryForDisplay, historyForViewer } from './moveHistory';
 import {
   aiSearchProfile,
   SIDE_OPTIONS,
@@ -33,6 +33,7 @@ export function BattleView() {
   const endBanner = useAppStore((s) => s.endBanner);
   const restart = useAppStore((s) => s.restart);
   const resign = useAppStore((s) => s.resign);
+  const finishExtraMove = useAppStore((s) => s.finishExtraMove);
   const startAiMatch = useAppStore((s) => s.startAiMatch);
   const tickClock = useAppStore((s) => s.tickClock);
   const resetClocks = useAppStore((s) => s.resetClocks);
@@ -103,7 +104,8 @@ export function BattleView() {
         if (!onlineClocksStarted.current) {
           onlineClocksStarted.current = true;
           const ms = online.getMatchClockMs();
-          resetClocks('white', ms > 0 ? ms : timePresetMs(onlineTimePreset));
+          const active = useAppStore.getState().state.activePlayer;
+          resetClocks(active, ms > 0 ? ms : timePresetMs(onlineTimePreset));
         }
       } else {
         onlineClocksStarted.current = false;
@@ -118,18 +120,21 @@ export function BattleView() {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const historyBlocks = useMemo(() => groupHistoryForDisplay(moveHistory), [moveHistory]);
+  const onlineStatus = online.getStatus();
+  const roomId = online.getRoomId();
+  const myColor = online.getMyColor();
+  const historyViewer = battleMode === 'online' ? myColor : 'white';
+  const historyBlocks = useMemo(
+    () => groupHistoryForDisplay(historyForViewer(moveHistory, historyViewer, state)),
+    [moveHistory, historyViewer, state],
+  );
   const lastPly = moveHistory.reduce((max, e) => (e.kind === 'ply' ? Math.max(max, e.ply) : max), 0);
   const historyScrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = historyScrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [moveHistory]);
-
-  const onlineStatus = online.getStatus();
-  const roomId = online.getRoomId();
-  const myColor = online.getMyColor();
+  }, [moveHistory, historyBlocks]);
   const activeDeck = decks.find((d) => d.id === activeDeckId) ?? decks[0];
 
   const winnerLabel = (w: 'white' | 'black') => (w === 'white' ? 'белые' : 'чёрные');
@@ -189,6 +194,16 @@ export function BattleView() {
     state.phase === 'play' &&
     ((battleMode === 'ai' && aiPlaying) ||
       (battleMode === 'online' && onlineStatus === 'playing'));
+
+  const extraMovePiece = state.extraMovePieceId
+    ? state.pieces.find((p) => p.id === state.extraMovePieceId)
+    : undefined;
+  const canFinishExtraMove =
+    canResign &&
+    Boolean(extraMovePiece) &&
+    state.activePlayer === extraMovePiece!.owner &&
+    ((battleMode === 'ai' && extraMovePiece!.owner === 'white') ||
+      (battleMode === 'online' && online.getMyColor() === extraMovePiece!.owner));
 
   const resignWasYou =
     endBanner?.kind === 'resign' &&
@@ -284,9 +299,25 @@ export function BattleView() {
             </button>
           </div>
           <p className={styles.status}>{status}</p>
+          {canFinishExtraMove && (
+            <p className={styles.extraMoveHint}>
+              Странник может сходить ещё раз — или нажмите «Закончить ход», чтобы сохранить
+              способность.
+            </p>
+          )}
           {lastError && <p className={styles.error}>{lastError}</p>}
         </div>
         <div className={styles.hudActions}>
+          {canFinishExtraMove && (
+            <button
+              type="button"
+              className={styles.finishTurn}
+              onClick={() => finishExtraMove()}
+              title="Завершить ход без второго хода Странника (способность сохранится)"
+            >
+              Закончить ход
+            </button>
+          )}
           {canResign && (
             <button type="button" className={styles.resign} onClick={() => resign()}>
               Сдаться
@@ -553,13 +584,18 @@ export function BattleView() {
                     <div className={styles.historyScroll} ref={historyScrollRef}>
                       <ol className={styles.historyList}>
                         {groupHistoryForDisplay(
-                          analysis.plies.map((p) => ({
-                            ply: p.ply,
-                            turn: Math.ceil(p.ply / 2),
-                            player: p.player,
-                            text: p.playedLabel,
-                            kind: 'ply' as const,
-                          })),
+                          (() => {
+                            const turns = assignDisplayTurns(
+                              analysis.plies.map((p) => p.player),
+                            );
+                            return analysis.plies.map((p, i) => ({
+                              ply: p.ply,
+                              turn: turns[i] ?? Math.ceil(p.ply / 2),
+                              player: p.player,
+                              text: p.playedLabel,
+                              kind: 'ply' as const,
+                            }));
+                          })(),
                         ).map((block) => {
                           if (block.type !== 'turn') return null;
                           const { row } = block;

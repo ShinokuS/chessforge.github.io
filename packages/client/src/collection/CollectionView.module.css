@@ -23,6 +23,77 @@
   align-items: flex-end;
 }
 
+.badges {
+  display: none;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+}
+
+.stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 5.5rem;
+  padding: 0.35rem 0.55rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-dim) 45%, transparent);
+}
+
+.statCost {
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg2));
+}
+
+.statCostCredit {
+  border-color: color-mix(in srgb, #5a9a6e 40%, transparent);
+  background: color-mix(in srgb, #5a9a6e 10%, var(--bg2));
+}
+
+.statCostCredit .statIcon,
+.statCostCredit .statValue {
+  color: color-mix(in srgb, #6fbf87 85%, var(--ink));
+}
+
+.statLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+  line-height: 1;
+}
+
+.statIcon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+.statValue {
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.1;
+  color: var(--ink);
+  padding-left: 1.35rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.costBadge {
+  display: none;
+}
+
+.countBadge {
+  display: none;
+}
+
 .search {
   display: flex;
   flex-direction: column;
@@ -110,11 +181,31 @@
   cursor: pointer;
 }
 
-.glyph {
-  width: 2.25rem;
-  height: 2.25rem;
+.glyphFrame {
+  width: 3rem;
+  height: 3rem;
   flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background:
+    radial-gradient(
+      circle at 35% 28%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg) 55%, var(--bg2));
+  border: 1px solid color-mix(in srgb, var(--accent-dim) 55%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, white 8%, transparent),
+    0 2px 6px color-mix(in srgb, black 18%, transparent);
+}
+
+.glyph {
+  width: 2.35rem;
+  height: 2.35rem;
   display: block;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.22));
 }
 
 .body {
@@ -131,16 +222,11 @@
 }
 
 .mod {
-  font-size: 0.75rem;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  display: none;
 }
 
 .meta {
-  color: var(--muted);
-  font-size: 0.9rem;
-  margin-top: 0.15rem;
+  display: none;
 }
 
 .desc {
@@ -151,7 +237,7 @@
 }
 
 .details {
-  padding: 0 0.9rem 0.85rem 3.9rem;
+  padding: 0 0.9rem 0.85rem 4.65rem;
   display: flex;
   flex-direction: column;
   gap: 0.15rem;

@@ -8,13 +8,18 @@ import {
 import { useAppStore } from '../app/store';
 import { PieceIcon } from '../battle/PieceIcon';
 import { MoveDiagram } from './MoveDiagram';
+import { CostIcon, CountIcon } from './CollectionStatIcons';
 
 const ROLE_ORDER: PieceRole[] = ['king', 'queen', 'rook', 'bishop', 'knight', 'pawn'];
 
+function formatCost(cost: number): string {
+  if (cost === 0) return '0';
+  if (cost > 0) return `+${cost}`;
+  return String(cost);
+}
+
 export function CollectionView() {
   const cards = useAppStore((s) => s.cards);
-  const repo = useAppStore((s) => s.repo);
-  const refreshMeta = useAppStore((s) => s.refreshMeta);
   const [openId, setOpenId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
@@ -44,27 +49,16 @@ export function CollectionView() {
           Карты сгруппированы по базовой шахматной роли. Модификации занимают тот же слот
           при сборе колоды.
         </p>
-        <div className={styles.headActions}>
-          <label className={styles.search}>
-            <span className={styles.searchLabel}>Поиск</span>
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Название фигуры…"
-              autoComplete="off"
-            />
-          </label>
-          <button
-            type="button"
-            onClick={() => {
-              repo.resetToStarter();
-              refreshMeta();
-            }}
-          >
-            Сбросить стартовый набор
-          </button>
-        </div>
+        <label className={styles.search}>
+          <span className={styles.searchLabel}>Поиск</span>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Название фигуры…"
+            autoComplete="off"
+          />
+        </label>
       </div>
 
       {grouped.length === 0 ? (
@@ -90,17 +84,38 @@ export function CollectionView() {
                       onClick={() => setOpenId(open ? null : card.defId)}
                       aria-expanded={open}
                     >
-                      <span className={styles.glyph}>
-                        <PieceIcon defId={card.defId} owner="white" />
+                      <span className={styles.glyphFrame}>
+                        <PieceIcon defId={card.defId} owner="white" className={styles.glyph} />
                       </span>
                       <span className={styles.body}>
                         <span className={styles.titleRow}>
                           <strong>{def.name}</strong>
-                          {!def.isBase && <span className={styles.mod}>модификация</span>}
                         </span>
-                        <span className={styles.meta}>
-                          {def.rarity} · cost {def.cost} · ×{card.count} · слот:{' '}
-                          {ROLE_LABELS[def.baseRole]}
+                        <span className={styles.stats}>
+                          {!def.isBase && (
+                            <span
+                              className={[
+                                styles.stat,
+                                styles.statCost,
+                                def.cost < 0 ? styles.statCostCredit : '',
+                              ]
+                                .filter(Boolean)
+                                .join(' ')}
+                            >
+                              <span className={styles.statLabel}>
+                                <CostIcon className={styles.statIcon ?? ''} />
+                                Стоимость
+                              </span>
+                              <span className={styles.statValue}>{formatCost(def.cost)}</span>
+                            </span>
+                          )}
+                          <span className={styles.stat}>
+                            <span className={styles.statLabel}>
+                              <CountIcon className={styles.statIcon ?? ''} />
+                              Количество
+                            </span>
+                            <span className={styles.statValue}>{card.count}</span>
+                          </span>
                         </span>
                       </span>
                     </button>

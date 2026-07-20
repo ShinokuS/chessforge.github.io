@@ -580,6 +580,197 @@ export const dynastDef: PieceDefinition = {
   ],
 };
 
+/** Ход только на 1 вперёд; раз за матч авто +1 HP первой союзной фигуре впереди. */
+export const clericDef: PieceDefinition = {
+  id: 'cleric',
+  name: 'Клерик',
+  baseRole: 'pawn',
+  isBase: false,
+  description:
+    'Модификация пешки: ходит только на 1 клетку вперёд. Один раз за партию автоматически даёт +1 HP первой союзной фигуре по линии прямо перед собой (даже если она уже на максимуме HP).',
+  cost: 3,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  splitCapture: true,
+  captureOffsets: [
+    { x: -1, y: 1 },
+    { x: 1, y: 1 },
+  ],
+  movement: [{ kind: 'leap', offsets: [{ x: 0, y: 1 }] }],
+  abilities: [
+    {
+      id: 'frontBless',
+      description: 'Пассивно раз за матч: +1 HP первой союзной фигуре впереди.',
+    },
+  ],
+};
+
+/** Враги в радиусе 2 ходят как по топи. */
+export const quagmireDef: PieceDefinition = {
+  id: 'quagmire',
+  name: 'Топь',
+  baseRole: 'rook',
+  isBase: false,
+  description:
+    'Модификация ладьи: обычные ходы. Вражеские фигуры в радиусе 2 клеток замедляются — их ход ограничен одной клеткой, как на топи.',
+  cost: 4,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  marshAuraRadius: 2,
+  movement: [{ kind: 'slide', directions: ORTHO, maxRange: 8 }],
+};
+
+/** Пропуск первого хода стороны; −3 к бюджету колоды. */
+export const sluggardDef: PieceDefinition = {
+  id: 'sluggard',
+  name: 'Промедление',
+  baseRole: 'rook',
+  isBase: false,
+  description:
+    'Модификация ладьи: обычные ходы. Если эта фигура в колоде — вы пропускаете первый ход. Даёт −3 к стоимости колоды.',
+  cost: -3,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  skipFirstTurn: true,
+  movement: [{ kind: 'slide', directions: ORTHO, maxRange: 8 }],
+};
+
+/** Раз за матч проклятие: враг не может вредить этому слону. */
+export const hexerDef: PieceDefinition = {
+  id: 'hexer',
+  name: 'Проклинатель',
+  baseRole: 'bishop',
+  isBase: false,
+  description:
+    'Модификация слона: обычные ходы. Один раз за партию может наложить проклятие на вражескую фигуру — она не сможет атаковать или наносить урон этому слону.',
+  cost: 4,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'slide', directions: DIAG, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'curseEnemy',
+      description: 'Один раз: проклясть вражескую фигуру.',
+    },
+  ],
+};
+
+/** Раз за матч двойной ход, затем 2 хода стоит на месте. */
+export const wayfarerDef: PieceDefinition = {
+  id: 'wayfarer',
+  name: 'Странник',
+  baseRole: 'bishop',
+  isBase: false,
+  description:
+    'Модификация слона: обычные ходы. Один раз за партию после хода может сходить ещё раз (или отказаться кнопкой «Закончить ход»). После второго хода стоит на месте 2 своих хода.',
+  cost: 5,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  doubleMoveOnce: { freezeAfter: 2 },
+  movement: [{ kind: 'slide', directions: DIAG, maxRange: 8 }],
+};
+
+/** Рядом с королём ходит ещё и как король. */
+export const escortDef: PieceDefinition = {
+  id: 'escort',
+  name: 'Эскорт',
+  baseRole: 'knight',
+  isBase: false,
+  description:
+    'Модификация коня: обычные прыжки коня. Если король на соседней клетке — дополнительно может ходить и атаковать как король.',
+  cost: 1,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  royalEscort: true,
+  movement: [{ kind: 'leap', offsets: KNIGHT_OFFSETS }],
+};
+
+/** 4 HP; после хода 1 ход стоит на месте. */
+export const juggernautDef: PieceDefinition = {
+  id: 'juggernaut',
+  name: 'Тяжёлый конь',
+  baseRole: 'knight',
+  isBase: false,
+  description:
+    'Модификация коня: ходит как обычный конь, 4 HP. После каждого хода пропускает следующий свой ход.',
+  cost: 4,
+  rarity: 'uncommon',
+  maxHp: 4,
+  attack: 1,
+  postMoveFreezeTurns: 1,
+  movement: [{ kind: 'leap', offsets: KNIGHT_OFFSETS }],
+};
+
+/** Превращает равнину в шипы; фигура на клетке погибнет, если не уйдёт. */
+export const thornqueenDef: PieceDefinition = {
+  id: 'thornqueen',
+  name: 'Шиповник',
+  baseRole: 'queen',
+  isBase: false,
+  description:
+    'Модификация ферзя: обычные ходы. Один раз за партию может превратить равнину в шипы. Если на клетке стоит фигура, у неё есть свой ход, чтобы уйти — иначе погибнет.',
+  cost: 3,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  spikePlacer: true,
+  movement: [{ kind: 'slide', directions: ALL_DIRS, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'spikeTile',
+      description: 'Один раз: превратить равнину в шипы.',
+    },
+  ],
+};
+
+/** Раз за матч делает пешку невидимой для соперника на 2 его хода. */
+export const veilqueenDef: PieceDefinition = {
+  id: 'veilqueen',
+  name: 'Покров',
+  baseRole: 'queen',
+  isBase: false,
+  description:
+    'Модификация ферзя: обычные ходы. Один раз за партию может скрыть любую свою пешку на 2 хода соперника — он не видит её в свой ход и во время вашего хода между ними.',
+  cost: 6,
+  rarity: 'rare',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'slide', directions: ALL_DIRS, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'cloakPawn',
+      description: 'Один раз: невидимость своей пешки на 2 хода соперника.',
+    },
+  ],
+};
+
+/** После 10-го хода при перевесе по фигурам — раз +1 HP союзнику вместо хода. */
+export const judgeDef: PieceDefinition = {
+  id: 'judge',
+  name: 'Судья',
+  baseRole: 'king',
+  isBase: false,
+  description:
+    'Модификация короля: обычные ходы. После 10-го хода, если у вас больше фигур на доске, один раз за партию может вместо хода дать +1 HP любой своей фигуре.',
+  cost: 2,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'leap', offsets: ALL_DIRS }],
+  abilities: [
+    {
+      id: 'judgeBless',
+      description: 'Один раз после 10-го хода при перевесе: +1 HP союзнику.',
+    },
+  ],
+};
+
 export const PIECE_DEFS = [
   pawnDef,
   skirmisherDef,
@@ -608,4 +799,14 @@ export const PIECE_DEFS = [
   anchorDef,
   hierophantDef,
   dynastDef,
+  clericDef,
+  quagmireDef,
+  sluggardDef,
+  hexerDef,
+  wayfarerDef,
+  escortDef,
+  juggernautDef,
+  thornqueenDef,
+  veilqueenDef,
+  judgeDef,
 ] as const;

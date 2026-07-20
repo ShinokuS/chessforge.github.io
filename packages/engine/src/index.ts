@@ -66,4 +66,21 @@ export type {
 } from './commands/types.js';
 
 export type { LegalMove } from './pieces/movement.js';
-export { getBuffedPieceIds } from './pieces/movement.js';
+export { getBuffedPieceIds, isPieceMarshSlowed } from './pieces/movement.js';
+export { getPieceAuraOverlay } from './pieces/aura.js';
+export type { AuraKind, PieceAuraOverlay } from './pieces/aura.js';
+
+export {
+  formatEventsToHistory,
+  appendHistoryFromEvents,
+  groupHistoryForDisplay,
+  assignDisplayTurns,
+  historyTextForViewer,
+  historyForViewer,
+} from './match/history.js';
+export type {
+  MoveHistoryEntry,
+  HistoryTurnRow,
+  HistoryDisplayBlock,
+  FormatHistoryOptions,
+} from './match/history.js';

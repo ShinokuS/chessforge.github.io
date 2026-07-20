@@ -144,6 +144,12 @@ function tryAddMove(
   }
   if (mover && occupant.owner === mover.owner) return 'blocked';
   if ((occupant.shieldTurns ?? 0) > 0) return 'blocked';
+  if (
+    mover?.cursedCannotHarmId &&
+    occupant.id === mover.cursedCannotHarmId
+  ) {
+    return 'blocked';
+  }
   if (mode === 'capture' || mode === 'both') {
     out.push({
       from,
@@ -212,7 +218,37 @@ function applyMudCap(state: MatchState, mover: PieceInstance, moves: LegalMove[]
   const def = getPieceDefinition(mover.defId);
   if (tile.movementCapImmuneRoles?.includes(def.baseRole)) return moves;
   const cap = tile.movementCap;
-  return moves.filter((m) => chebyshev(m.from, m.to) <= cap);
+  // Ram push: mover stays put — distance-to-landing must not block the shove.
+  return moves.filter((m) => m.push || chebyshev(m.from, m.to) <= cap);
+}
+
+function isMarshSlowed(state: MatchState, mover: PieceInstance): boolean {
+  for (const aura of state.pieces) {
+    if (aura.owner === mover.owner) continue;
+    const auraDef = getPieceDefinition(aura.defId);
+    if (!auraDef.marshAuraRadius) continue;
+    if (chebyshev(mover.pos, aura.pos) <= auraDef.marshAuraRadius) return true;
+  }
+  return false;
+}
+
+/** True if an enemy marsh aura currently caps this piece's move distance (knights ignore it). */
+export function isPieceMarshSlowed(state: MatchState, piece: PieceInstance): boolean {
+  const def = getPieceDefinition(piece.defId);
+  if (def.baseRole === 'knight') return false;
+  return isMarshSlowed(state, piece);
+}
+
+function applyMarshAuraCap(
+  state: MatchState,
+  mover: PieceInstance,
+  moves: LegalMove[],
+): LegalMove[] {
+  if (!isMarshSlowed(state, mover)) return moves;
+  const def = getPieceDefinition(mover.defId);
+  const cap = 1;
+  if (def.baseRole === 'knight') return moves;
+  return moves.filter((m) => m.push || chebyshev(m.from, m.to) <= cap);
 }
 
 function getLineBuffTargets(state: MatchState, buffer: PieceInstance): PieceInstance[] {
@@ -251,6 +287,20 @@ export function getBuffedPieceIds(state: MatchState): Set<string> {
     }
   }
   return ids;
+}
+
+function addRoyalEscortMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+  const def = getPieceDefinition(piece.defId);
+  if (!def.royalEscort) return;
+  const kingNear = state.pieces.some(
+    (p) =>
+      p.owner === piece.owner &&
+      p.isRoyal &&
+      p.id !== piece.id &&
+      chebyshev(p.pos, piece.pos) === 1,
+  );
+  if (!kingNear) return;
+  addKingAuraMoves(state, piece, out);
 }
 
 function addKingAuraMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
@@ -454,8 +504,6 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
       for (const ally of state.pieces) {
         if (ally.owner !== piece.owner || ally.id === piece.id) continue;
         if (chebyshev(piece.pos, ally.pos) > 3) continue;
-        const maxHp = getPieceDefinition(ally.defId).maxHp;
-        if (ally.hp >= maxHp) continue;
         out.push({
           from: { ...piece.pos },
           to: { ...ally.pos },
@@ -507,6 +555,80 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
         });
       }
     }
+
+    // frontBless is passive (auto) — not a clickable ability move.
+
+    if (ability.id === 'curseEnemy') {
+      for (const enemy of state.pieces) {
+        if (enemy.owner === piece.owner) continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...enemy.pos },
+          captures: false,
+          targetPieceId: enemy.id,
+          abilityId: 'curseEnemy',
+        });
+      }
+    }
+
+    if (ability.id === 'cloakPawn') {
+      for (const ally of state.pieces) {
+        if (ally.owner !== piece.owner) continue;
+        if (getPieceDefinition(ally.defId).baseRole !== 'pawn') continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...ally.pos },
+          captures: false,
+          targetPieceId: ally.id,
+          abilityId: 'cloakPawn',
+        });
+      }
+    }
+
+    if (ability.id === 'judgeBless') {
+      if (state.turn < 10) continue;
+      const mine = state.pieces.filter((p) => p.owner === piece.owner).length;
+      const theirs = state.pieces.filter((p) => p.owner !== piece.owner).length;
+      if (mine <= theirs) continue;
+      for (const ally of state.pieces) {
+        if (ally.owner !== piece.owner || ally.id === piece.id) continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...ally.pos },
+          captures: false,
+          targetPieceId: ally.id,
+          abilityId: 'judgeBless',
+        });
+      }
+    }
+  }
+}
+
+function addSpikePlacerMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+  const def = getPieceDefinition(piece.defId);
+  if (!def.spikePlacer) return;
+  if (piece.abilitiesUsed.spikeTile) return;
+  for (const pattern of def.movement) {
+    if (pattern.kind !== 'slide') continue;
+    const maxRange = resolveSlideRange(state, piece, pattern);
+    for (const dir of pattern.directions) {
+      for (let step = 1; step <= maxRange; step++) {
+        const to = {
+          x: piece.pos.x + dir.x * step,
+          y: piece.pos.y + dir.y * step,
+        };
+        if (!inBounds(to, state.board.width, state.board.height)) break;
+        const tileId = state.board.tiles[to.y]?.[to.x];
+        if (tileId !== 'plain') break;
+        out.push({
+          from: { ...piece.pos },
+          to,
+          captures: false,
+          abilityId: 'spikeTile',
+        });
+        if (pieceAt(state, to)) break;
+      }
+    }
   }
 }
 
@@ -528,6 +650,7 @@ export function getLegalMovesForPiece(
 ): LegalMove[] {
   if (state.phase !== 'play') return [];
   if (piece.owner !== state.activePlayer) return [];
+  if (state.extraMovePieceId && state.extraMovePieceId !== piece.id) return [];
   if ((piece.frozenTurns ?? 0) > 0) return [];
 
   const def = getPieceDefinition(piece.defId);
@@ -561,9 +684,11 @@ export function getLegalMovesForPiece(
   }
 
   addAbilityMoves(state, piece, moves);
+  addSpikePlacerMoves(state, piece, moves);
   addRamPush(state, piece, moves);
   addCaveMoves(state, piece, moves);
   addCastlingMoves(state, piece, moves);
+  addRoyalEscortMoves(state, piece, moves);
 
   const buffed = getBuffedPieceIds(state);
   if (buffed.has(piece.id)) {
@@ -571,10 +696,14 @@ export function getLegalMovesForPiece(
   }
 
   // Castling is exempt from mud distance cap (king jumps 2)
-  const capped = applyMudCap(
+  const capped = applyMarshAuraCap(
     state,
     piece,
-    moves.filter((m) => !m.castle),
+    applyMudCap(
+      state,
+      piece,
+      moves.filter((m) => !m.castle),
+    ),
   );
   const castles = moves.filter((m) => m.castle);
   return dedupeMoves([...capped, ...castles]);
@@ -589,14 +718,22 @@ export function findLegalMove(
   from: Coord,
   to: Coord,
   abilityId?: AbilityId,
+  push?: boolean,
 ): LegalMove | undefined {
   const piece = pieceAt(state, from);
   if (!piece) return undefined;
-  return getLegalMovesForPiece(state, piece).find(
-    (m) =>
-      coordsEqual(m.to, to) &&
-      (abilityId === undefined || m.abilityId === abilityId),
-  );
+  const moves = getLegalMovesForPiece(state, piece).filter((m) => coordsEqual(m.to, to));
+  if (abilityId !== undefined) {
+    return moves.find((m) => m.abilityId === abilityId);
+  }
+  if (push === true) {
+    return moves.find((m) => Boolean(m.push));
+  }
+  if (push === false) {
+    return moves.find((m) => !m.push);
+  }
+  // Prefer a normal move when both a quiet step and a ram-push share `to`.
+  return moves.find((m) => !m.push) ?? moves[0];
 }
 
 export type { PieceRole };

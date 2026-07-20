@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   applyCommand,
   createMatch,
+  createMatchFromPlacements,
   createPieceInstance,
   createRectBoard,
+  classicBasePlacements,
   generateSymmetricBattlefield,
   getBuffedPieceIds,
   getLegalMoves,
@@ -619,11 +621,56 @@ describe('new piece mods', () => {
       type: 'move',
       from: { x: 3, y: 1 },
       to: { x: 3, y: 3 },
+      push: true,
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.state.pieces.find((p) => p.id === 'ram')?.pos).toEqual({ x: 3, y: 1 });
     expect(result.state.pieces.find((p) => p.id === 'bp')?.pos).toEqual({ x: 3, y: 3 });
+  });
+
+  it('ram push works on mud (mover does not travel)', () => {
+    const state = blankMatch(
+      [
+        createPieceInstance('ram', 'white', { x: 3, y: 1 }, 'ram'),
+        createPieceInstance('pawn', 'black', { x: 3, y: 2 }, 'bp'),
+        createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+        createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+      ],
+      [{ pos: { x: 3, y: 1 }, tileId: 'mud' }],
+    );
+    const push = getLegalMoves(state, { x: 3, y: 1 }).find((m) => m.push);
+    expect(push?.to).toEqual({ x: 3, y: 3 });
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 1 },
+      to: { x: 3, y: 3 },
+      push: true,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'bp')?.pos).toEqual({ x: 3, y: 3 });
+  });
+
+  it('ram cannot push a shielded piece or into an occupied square', () => {
+    const shielded = blankMatch([
+      createPieceInstance('ram', 'white', { x: 3, y: 1 }, 'ram'),
+      createPieceInstance('pawn', 'black', { x: 3, y: 2 }, 'bp'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    const victim = shielded.pieces.find((p) => p.id === 'bp');
+    if (victim) victim.shieldTurns = 2;
+    expect(getLegalMoves(shielded, { x: 3, y: 1 }).some((m) => m.push)).toBe(false);
+
+    const blocked = blankMatch([
+      createPieceInstance('ram', 'white', { x: 3, y: 1 }, 'ram'),
+      createPieceInstance('pawn', 'black', { x: 3, y: 2 }, 'bp'),
+      createPieceInstance('pawn', 'black', { x: 3, y: 3 }, 'bp2'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    expect(getLegalMoves(blocked, { x: 3, y: 1 }).some((m) => m.push)).toBe(false);
   });
 
   it('bristling reflects damage once and can kill the attacker', () => {
@@ -809,6 +856,137 @@ describe('new piece mods', () => {
     expect(moves.some((m) => m.to.x === 3 && m.to.y === 3)).toBe(true);
     expect(moves.some((m) => m.to.x === 5 && m.to.y === 5)).toBe(false);
   });
+
+  it('cleric auto-heals the first allied piece ahead once', () => {
+    const state = blankMatch([
+      createPieceInstance('cleric', 'white', { x: 4, y: 1 }, 'cw'),
+      createPieceInstance('knight', 'white', { x: 2, y: 2 }, 'nw'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
+    ]);
+    // Knight leaps onto the file ahead of the cleric → passive heal.
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 2, y: 2 },
+      to: { x: 4, y: 3 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'nw')?.hp).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'cw')?.abilitiesUsed.frontBless).toBe(true);
+    expect(result.events.some((e) => e.type === 'Healed' && e.pieceId === 'nw')).toBe(true);
+  });
+
+  it('cleric auto-heals the first allied piece ahead even if not adjacent', () => {
+    const state = blankMatch([
+      createPieceInstance('cleric', 'white', { x: 4, y: 1 }, 'cw'),
+      createPieceInstance('pawn', 'white', { x: 4, y: 4 }, 'pw1'),
+      createPieceInstance('pawn', 'white', { x: 4, y: 6 }, 'pw2'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    // Any white move should trigger the passive if an ally is already ahead.
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 1 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'pw1')?.hp).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'pw2')?.hp).toBe(1);
+    expect(result.state.pieces.find((p) => p.id === 'cw')?.abilitiesUsed.frontBless).toBe(true);
+  });
+
+  it('hexer curse blocks the enemy from capturing the bishop', () => {
+    const state = blankMatch([
+      createPieceInstance('hexer', 'white', { x: 4, y: 4 }, 'hb'),
+      createPieceInstance('rook', 'black', { x: 4, y: 7 }, 'rb'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const curse = applyCommand(state, {
+      type: 'move',
+      from: { x: 4, y: 4 },
+      to: { x: 4, y: 7 },
+      abilityId: 'curseEnemy',
+    });
+    expect(curse.ok).toBe(true);
+    if (!curse.ok) return;
+    const capture = applyCommand(curse.state, {
+      type: 'move',
+      from: { x: 4, y: 7 },
+      to: { x: 4, y: 4 },
+    });
+    expect(capture.ok).toBe(false);
+  });
+
+  it('quagmire aura limits enemy rook range to 1', () => {
+    const state = blankMatch([
+      createPieceInstance('quagmire', 'white', { x: 0, y: 5 }, 'qr'),
+      createPieceInstance('rook', 'black', { x: 0, y: 7 }, 'rb'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    state.activePlayer = 'black';
+    const moves = getLegalMoves(state, { x: 0, y: 7 });
+    expect(moves.some((m) => m.to.x === 0 && m.to.y === 0)).toBe(false);
+    expect(moves.some((m) => m.to.x === 0 && m.to.y === 6)).toBe(true);
+  });
+
+  it('wayfarer moves twice then freezes', () => {
+    const state = blankMatch([
+      createPieceInstance('wayfarer', 'white', { x: 2, y: 2 }, 'wb'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const first = applyCommand(state, {
+      type: 'move',
+      from: { x: 2, y: 2 },
+      to: { x: 4, y: 4 },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.state.activePlayer).toBe('white');
+    expect(first.state.extraMovePieceId).toBe('wb');
+    const second = applyCommand(first.state, {
+      type: 'move',
+      from: { x: 4, y: 4 },
+      to: { x: 6, y: 6 },
+    });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.state.pieces.find((p) => p.id === 'wb')?.frozenTurns).toBe(2);
+    expect(second.state.activePlayer).toBe('black');
+  });
+
+  it('thornqueen places spikes once per match', () => {
+    const state = blankMatch([
+      createPieceInstance('thornqueen', 'white', { x: 3, y: 0 }, 'tq'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const first = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 0 },
+      to: { x: 3, y: 3 },
+      abilityId: 'spikeTile',
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect(first.state.board.tiles[3]![3]).toBe('spikes');
+    expect(first.state.pieces.find((p) => p.id === 'tq')?.abilitiesUsed.spikeTile).toBe(true);
+    expect(first.state.pieces.find((p) => p.id === 'tq')?.pos).toEqual({ x: 3, y: 0 });
+
+    first.state.activePlayer = 'white';
+    const again = applyCommand(first.state, {
+      type: 'move',
+      from: { x: 3, y: 0 },
+      to: { x: 4, y: 0 },
+      abilityId: 'spikeTile',
+    });
+    expect(again.ok).toBe(false);
+  });
 });
 
 describe('symmetric battlefield', () => {
@@ -829,5 +1007,39 @@ describe('symmetric battlefield', () => {
     }
     expect(special).toBe(6);
     expect(types.size).toBe(3);
+  });
+});
+
+describe('skipFirstTurn (Промедление)', () => {
+  it('auto-skips the first turn of the side that has a skipFirstTurn piece', () => {
+    const white = classicBasePlacements().map((p) =>
+      p.slotId === 'a1' ? { ...p, defId: 'sluggard' } : p,
+    );
+    const black = classicBasePlacements();
+    const state = createMatchFromPlacements(white, black, 7);
+
+    expect(state.turn).toBe(1);
+    expect(state.activePlayer).toBe('black');
+    expect(state.openingSkipSequence).toEqual(['white']);
+  });
+
+  it('skips black first turn after white makes move', () => {
+    const white = classicBasePlacements();
+    const black = classicBasePlacements().map((p) =>
+      p.slotId === 'a1' ? { ...p, defId: 'sluggard' } : p,
+    );
+    const state = createMatchFromPlacements(white, black, 19);
+    expect(state.activePlayer).toBe('white');
+
+    const first = applyCommand(state, {
+      type: 'move',
+      from: { x: 1, y: 0 },
+      to: { x: 2, y: 2 },
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    expect(first.state.activePlayer).toBe('white');
+    expect(first.events.some((e) => e.type === 'TurnSkipped' && e.player === 'black')).toBe(true);
   });
 });

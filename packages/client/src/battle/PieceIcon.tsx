@@ -415,6 +415,179 @@ function Dynast({ owner }: { owner: PlayerId }) {
   );
 }
 
+/** Клерик — пешка с крестом и сиянием. */
+function Cleric({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M22.5 10c-2 0-3.5 1.6-3.5 3.5 0 1.2.6 2.2 1.5 2.8C18 18.5 16 21 16 24.5v1h13v-1c0-3.5-2-6-5-7.7.9-.6 1.5-1.6 1.5-2.8 0-1.9-1.5-3.5-3.5-3.5z" />
+      <path d="M13 36h19l-1.5-7H14.5z" />
+      <path d="M12 39h21v3H12z" />
+      <path d="M22.5 5.5v4M20.5 7.5h4" stroke={c.accent} fill="none" strokeWidth={1.8} strokeLinecap="round" />
+      <circle cx="22.5" cy="4.5" r="1.2" fill={c.accent} stroke="none" opacity="0.85" />
+    </Base>
+  );
+}
+
+/** Топь — ладья с волнами у основания. */
+function Quagmire({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M11 14.5h5.5V10H20v4.5h5V10h3.5v4.5H34V18l-2.2 3.5v6H13.2v-6L11 18z" />
+      <path d="M12.5 30.5h20l-1.5 3H14z" />
+      <path d="M11 36h23v4H11z" />
+      <path
+        d="M13 33c2-1.5 4-1.5 6 0s4 1.5 6 0 4-1.5 6 0"
+        stroke={c.accent}
+        fill="none"
+        strokeWidth={1.6}
+        strokeLinecap="round"
+      />
+    </Base>
+  );
+}
+
+/** Промедление — ладья с песочными часами. */
+function Sluggard({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M13 16h4v-3h3v3h4v-3h3v3h4v4l-2 2v7H15v-7l-2-2z" />
+      <path d="M14 32h17l-1 3H15z" />
+      <path d="M13 37h19v3H13z" />
+      <path d="M22.5 19v10" stroke={c.accent} fill="none" strokeWidth={1.4} />
+      <path d="M19 21h7l-3.5 4.5zM19 27h7l-3.5-4.5z" fill={c.accent} stroke={c.stroke} strokeWidth={0.8} />
+    </Base>
+  );
+}
+
+/** Проклинатель — слон с проклятым глазом. */
+function Hexer({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="22.5" cy="10" r="2.4" />
+      <path d="M22.5 13.5c-4.8 3.2-8 8.2-8 13.2 0 2.2.6 4.1 1.6 5.8h12.8c1-1.7 1.6-3.6 1.6-5.8 0-5-3.2-10-8-13.2z" />
+      <path d="M13 36.5h19l-1.6-4H14.6z" />
+      <path d="M11.5 39h22v3.5h-22z" />
+      <circle cx="28" cy="22" r="2.8" fill={c.accent} stroke={c.stroke} />
+      <circle cx="28.8" cy="21.2" r="0.7" fill={c.stroke} stroke="none" />
+      <path d="M26 24.5c1.2 1.5 3.8 1.8 5.5 0" stroke={c.stroke} fill="none" strokeWidth={0.9} />
+    </Base>
+  );
+}
+
+/** Странник — слон с двойным следом. */
+function Wayfarer({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="22.5" cy="10" r="2.4" />
+      <path d="M22.5 13.5c-4.8 3.2-8 8.2-8 13.2 0 2.2.6 4.1 1.6 5.8h12.8c1-1.7 1.6-3.6 1.6-5.8 0-5-3.2-10-8-13.2z" opacity="0.55" />
+      <path d="M22.5 15.5c-3.8 2.6-6.5 6.5-6.5 10.5 0 1.8.5 3.4 1.3 4.8h10.4c.8-1.4 1.3-3 1.3-4.8 0-4-2.7-7.9-6.5-10.5z" />
+      <path d="M13 36.5h19l-1.6-4H14.6z" />
+      <path d="M11.5 39h22v3.5h-22z" />
+      <path
+        d="M10 28l3-2M10 32l3 2M35 28l-3-2M35 32l-3 2"
+        stroke={c.accent}
+        fill="none"
+        strokeWidth={1.5}
+        strokeLinecap="round"
+      />
+    </Base>
+  );
+}
+
+/** Эскорт — конь с королевской короной рядом. */
+function Escort({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M14 38.5h18v3.5H13z" />
+      <path d="M14 33.5h17l-1-4c2-2 3.5-4.5 3.5-7.5 0-4.5-3.5-8-8-8-2 0-3.5.5-5 1.2L15 12v5l2 1c-1 1.2-1.5 2.6-1.5 4.2 0 1.4.4 2.7 1.1 3.8L13.5 30c-.5 1-.7 2-.6 3z" />
+      <circle cx="21" cy="19" r="1.1" fill={c.stroke} stroke="none" />
+      <path d="M30 10h2.5v2h2v2.5H30v2h-2.5v-2.5H25V12h2.5z" fill={c.accent} stroke={c.stroke} strokeWidth={0.8} />
+      <path d="M27 19.5c0-1.8 2.5-3 5-3v6c-2.5 0-5-1.2-5-3z" opacity="0.35" />
+    </Base>
+  );
+}
+
+/** Тяжёлый конь — массивный бронированный конь. */
+function Juggernaut({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M13 38.5h20v3.5H12z" />
+      <path d="M14 33h18l-1.2-3.5c2.2-1.6 4-4 4.5-7 .6-3.5-.5-6.8-3-9C30 11 27 9 23.5 9c-1.8 0-3.3.4-4.8 1.1L15 8v5.5l2.5 1.2c-.9 1.4-1.4 3-1.4 4.8 0 2 .6 3.8 1.6 5.3L13.5 29c-.6 1.2-.8 2.5-.7 3.8z" />
+      <path d="M17 22h13v4H17z" fill={c.accent} stroke={c.stroke} strokeWidth={0.8} />
+      <path d="M18 26v4M21 26v4M24 26v4M27 26v4" stroke={c.stroke} fill="none" strokeWidth={1} />
+      <circle cx="21.5" cy="18" r="1.3" fill={c.stroke} stroke="none" />
+    </Base>
+  );
+}
+
+/** Шиповник — ферзь с шипастым основанием. */
+function Thornqueen({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="12" cy="14" r="1.8" />
+      <circle cx="22.5" cy="11" r="1.8" />
+      <circle cx="33" cy="14" r="1.8" />
+      <path d="M12 16 14.8 28.5h15.4L33 16 27 22.5 22.5 14 18 22.5z" />
+      <path d="M14.5 30.5h16l-1.4 3.5h-13.2z" />
+      <path d="M12 37.5h21v4H12z" />
+      <path
+        d="M14 36l2-3 2.5 3 2.5-3 2.5 3 2.5-3 2 3"
+        fill={c.accent}
+        stroke={c.stroke}
+        strokeWidth={0.7}
+        strokeLinejoin="round"
+      />
+    </Base>
+  );
+}
+
+/** Покров — ферзь в полупрозрачном покрывале. */
+function Veilqueen({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="22.5" cy="10" r="2" />
+      <path d="M13 16 16 28.5h13L32 16 27 22 22.5 14 18 22z" />
+      <path d="M14.5 30.5h16l-1.4 3.5h-13.2z" />
+      <path d="M12 37.5h21v4H12z" />
+      <path
+        d="M11 17c4 8 19 8 23 0v16c-4 6-19 6-23 0z"
+        fill={c.fill}
+        stroke={c.accent}
+        strokeWidth={1.2}
+        opacity="0.45"
+      />
+      <path d="M14 20c3 5 14 5 17 0" stroke={c.accent} fill="none" strokeWidth={1.2} strokeLinecap="round" />
+    </Base>
+  );
+}
+
+/** Судья — король с весами правосудия. */
+function Judge({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M20.5 8.5h4v3h3v4h-3v3h-4v-3h-3v-4h3z" />
+      <path d="M13.5 20.5c0-3.2 4-5.5 9-5.5s9 2.3 9 5.5c0 4.5-3.2 7.2-5.2 10.5H18.7c-2-3.3-5.2-6-5.2-10.5z" />
+      <path d="M14.5 33.5h16l-1.5 3H16z" />
+      <path d="M12 38.5h21v3.5H12z" />
+      {/* Minimal scales mark for clarity in small size. */}
+      <path d="M17 24h11" stroke={c.accent} fill="none" strokeWidth={1.8} strokeLinecap="round" />
+      <path d="M22.5 22v3.6" stroke={c.accent} fill="none" strokeWidth={1.6} strokeLinecap="round" />
+      <circle cx="18" cy="29" r="2.1" fill="none" stroke={c.accent} strokeWidth={1.3} />
+      <circle cx="27" cy="29" r="2.1" fill="none" stroke={c.accent} strokeWidth={1.3} />
+    </Base>
+  );
+}
+
 const ICONS: Record<string, (props: { owner: PlayerId }) => ReactElement> = {
   pawn: Pawn,
   skirmisher: Skirmisher,
@@ -443,10 +616,21 @@ const ICONS: Record<string, (props: { owner: PlayerId }) => ReactElement> = {
   anchor: Anchor,
   hierophant: Hierophant,
   dynast: Dynast,
+  cleric: Cleric,
+  quagmire: Quagmire,
+  sluggard: Sluggard,
+  hexer: Hexer,
+  wayfarer: Wayfarer,
+  escort: Escort,
+  juggernaut: Juggernaut,
+  thornqueen: Thornqueen,
+  veilqueen: Veilqueen,
+  judge: Judge,
 };
 
 export function PieceIcon({ defId, owner, className }: PieceIconProps) {
   const Icon = ICONS[defId] ?? Pawn;
+  const c = colors(owner);
 
   return (
     <svg
@@ -457,6 +641,7 @@ export function PieceIcon({ defId, owner, className }: PieceIconProps) {
       aria-hidden
       focusable="false"
     >
+      <ellipse cx="22.5" cy="41.2" rx="12" ry="2.4" fill={c.stroke} opacity="0.1" />
       <Icon owner={owner} />
     </svg>
   );

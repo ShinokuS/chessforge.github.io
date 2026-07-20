@@ -2,7 +2,7 @@ import type { AbilityId } from '../match/types.js';
 import type { Coord } from '../board/types.js';
 
 export type GameCommand =
-  | { type: 'move'; from: Coord; to: Coord; abilityId?: AbilityId }
+  | { type: 'move'; from: Coord; to: Coord; abilityId?: AbilityId; push?: boolean }
   | { type: 'endTurn' };
 
 export type GameEvent =
@@ -44,12 +44,27 @@ export type GameEvent =
   | { type: 'ShieldGranted'; pieceId: string; byPieceId: string; turns: number }
   | { type: 'TitleTransferred'; fromPieceId: string; toPieceId: string }
   | { type: 'Designated'; pieceId: string; byPieceId: string }
+  | {
+      type: 'Cursed';
+      pieceId: string;
+      byPieceId: string;
+      cannotHarmPieceId: string;
+    }
+  | { type: 'Cloaked'; pieceId: string; byPieceId: string; turns: number }
+  | {
+      type: 'TileChanged';
+      at: Coord;
+      fromTileId: string;
+      toTileId: string;
+      byPieceId: string;
+    }
   | { type: 'Promoted'; pieceId: string; toDefId: string; at: Coord }
   | { type: 'Reflected'; pieceId: string; byPieceId: string; damage: number }
   | { type: 'Teleported'; pieceId: string; from: Coord; to: Coord; tileId: string }
   | { type: 'TileTriggered'; tileId: string; pieceId: string; at: Coord; note: string }
   | { type: 'PieceDestroyed'; pieceId: string; at: Coord; reason?: string }
   | { type: 'AbilityUsed'; pieceId: string; abilityId: AbilityId }
+  | { type: 'TurnSkipped'; player: 'white' | 'black'; reason: 'skipFirstTurn' }
   | { type: 'TurnEnded'; previous: 'white' | 'black'; next: 'white' | 'black'; turn: number }
   | { type: 'GameOver'; winner: 'white' | 'black' };
 

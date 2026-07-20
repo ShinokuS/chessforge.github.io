@@ -1,11 +1,11 @@
 import { create } from 'zustand';
-import type { Coord, GameEvent, MatchState, PlayerId } from '@chessforge/engine';
+import type { AbilityId, Coord, GameEvent, MatchState, PlayerId } from '@chessforge/engine';
 import { GameSession } from '../adapters/GameSession';
 import { OnlineGameSession } from '../adapters/OnlineGameSession';
 import { LocalCollectionRepository } from '../repositories/LocalCollectionRepository';
 import type { Deck } from '../repositories/types.js';
 import {
-  formatEventsToHistory,
+  appendHistoryFromEvents,
   type MoveHistoryEntry,
 } from '../battle/moveHistory';
 import {
@@ -25,6 +25,7 @@ import {
   analyzeGame,
   type AnalyzedPly,
 } from '../battle/analyzeGame';
+import { isArmableAbility, type ArmedAction } from '../battle/abilities';
 
 export type AppView = 'battle' | 'collection' | 'deck' | 'library';
 export type BattleMode = 'ai' | 'online';
@@ -115,13 +116,18 @@ type AppStore = {
   lastError: string | null;
   selected: Coord | null;
   setSelected: (c: Coord | null) => void;
+  /** Armed optional action (curse, heal, spikes, ram push…) — null = normal move mode. */
+  abilityArmed: ArmedAction | null;
+  setAbilityArmed: (id: ArmedAction | null) => void;
   repo: LocalCollectionRepository;
   activeDeckId: string;
   setActiveDeckId: (id: string) => void;
   refreshMeta: () => void;
   cards: ReturnType<LocalCollectionRepository['listCards']>;
   decks: Deck[];
-  submitMove: (to: Coord) => void;
+  submitMove: (to: Coord, abilityId?: AbilityId) => void;
+  /** Decline optional second move (e.g. Wayfarer) without spending the ability. */
+  finishExtraMove: () => void;
   startAiMatch: () => void;
   restart: () => void;
   saveDeck: (deck: Deck, opts?: { startBattle?: boolean; makeActive?: boolean }) => void;
@@ -145,8 +151,19 @@ const initialRoom =
     ? (new URLSearchParams(window.location.search).get('room') ?? '')
     : '';
 
-function isPlyEntry(e: MoveHistoryEntry): boolean {
-  return e.kind === 'ply';
+function openingSkipEntries(state: MatchState): MoveHistoryEntry[] {
+  const openingSkips = state.openingSkipSequence;
+  if (!openingSkips || openingSkips.length === 0) return [];
+  return openingSkips.map((player, idx) => {
+    const ply = idx + 1;
+    return {
+      ply,
+      turn: Math.ceil(ply / 2),
+      player,
+      text: 'Промедление: пропуск первого хода',
+      kind: 'ply',
+    };
+  });
 }
 
 export const useAppStore = create<AppStore>((set, get) => {
@@ -158,17 +175,47 @@ export const useAppStore = create<AppStore>((set, get) => {
   ) => {
     if (get().battleMode !== mode) return;
     if (events.length === 0) {
-      set({ state, events, lastError });
+      const currentMoveHistory = get().moveHistory;
+      const entries = openingSkipEntries(state);
+      // matchStart / restart emit empty batches on a fresh turn-1 board.
+      const freshOpening =
+        state.phase === 'play' && state.turn === 1 && !state.extraMovePieceId;
+      if (freshOpening && (currentMoveHistory.length === 0 || entries.length > 0 || mode === 'online')) {
+        set({
+          state,
+          events,
+          lastError,
+          moveHistory: entries,
+          lastMove: null,
+          ...(mode === 'online'
+            ? { captures: { white: [] as string[], black: [] as string[] } }
+            : {}),
+        });
+      } else if (entries.length > 0 && currentMoveHistory.length === 0) {
+        set({
+          state,
+          events,
+          lastError,
+          moveHistory: entries,
+          lastMove: null,
+        });
+      } else {
+        set({ state, events, lastError });
+      }
       return;
     }
     const { moveHistory, clocks, captures } = get();
-    const realPlyCount = moveHistory.filter(isPlyEntry).length;
-    const appended = formatEventsToHistory(events, state, realPlyCount + 1);
+    const beforeState = get().state;
+    const continueExtraMove = Boolean(beforeState.extraMovePieceId);
+    const seeded =
+      moveHistory.length === 0 ? openingSkipEntries(state) : moveHistory;
+    const nextHistory = appendHistoryFromEvents(seeded, events, state, {
+      continueExtraMove,
+    });
     const move = lastMoveFromEvents(events);
 
     let nextClocks = clocks;
     let endBanner = get().endBanner;
-    const beforeState = get().state;
     const nextCaptures = {
       white: [...captures.white],
       black: [...captures.black],
@@ -212,7 +259,7 @@ export const useAppStore = create<AppStore>((set, get) => {
       clocks: nextClocks,
       endBanner,
       captures: nextCaptures,
-      moveHistory: appended.length ? [...moveHistory, ...appended] : moveHistory,
+      moveHistory: nextHistory,
       ...(move ? { lastMove: move } : {}),
     });
   };
@@ -284,7 +331,9 @@ export const useAppStore = create<AppStore>((set, get) => {
     analysis: idleAnalysis(),
     lastError: null,
     selected: null,
-    setSelected: (selected) => set({ selected }),
+    abilityArmed: null,
+    setSelected: (selected) => set({ selected, abilityArmed: null }),
+    setAbilityArmed: (abilityArmed) => set({ abilityArmed }),
     repo,
     activeDeckId: 'starter',
     setActiveDeckId: (activeDeckId) => set({ activeDeckId }),
@@ -439,12 +488,21 @@ export const useAppStore = create<AppStore>((set, get) => {
       const { analysis } = get();
       if (analysis.status !== 'done' || analysis.positions.length === 0) return;
       const c = Math.max(0, Math.min(analysis.positions.length - 1, Math.floor(cursor)));
-      set({ analysis: { ...analysis, cursor: c }, selected: null });
+      set({ analysis: { ...analysis, cursor: c }, selected: null, abilityArmed: null });
     },
     clearAnalysis: () => set({ analysis: idleAnalysis() }),
-    submitMove: (to) => {
-      const { selected, battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying } =
-        get();
+    submitMove: (to, abilityId) => {
+      const {
+        selected,
+        abilityArmed,
+        battleMode,
+        session: s,
+        online: o,
+        canControl,
+        state,
+        endBanner,
+        aiPlaying,
+      } = get();
       if (endBanner || state.phase === 'gameOver') return;
       if (battleMode === 'ai' && !aiPlaying) return;
       if (!selected) return;
@@ -457,16 +515,57 @@ export const useAppStore = create<AppStore>((set, get) => {
       const moves = active
         .getLegalMovesFrom(selected)
         .filter((m) => m.to.x === to.x && m.to.y === to.y);
-      const legal =
-        moves.find((m) => Boolean(m.abilityId) || Boolean(m.push)) ?? moves[0];
+
+      const wantAbility = abilityId ?? (abilityArmed && abilityArmed !== 'push' ? abilityArmed : undefined);
+      const wantPush = abilityArmed === 'push';
+      let legal;
+      if (wantPush) {
+        legal = moves.find((m) => Boolean(m.push));
+      } else if (wantAbility) {
+        legal = moves.find((m) => m.abilityId === wantAbility);
+      } else {
+        // Prefer a plain move/capture — never auto-pick push or optional ability.
+        legal =
+          moves.find((m) => !m.abilityId && !m.push) ??
+          moves.find((m) => Boolean(m.castle)) ??
+          moves[0];
+        if (legal?.push) return;
+        if (legal?.abilityId && isArmableAbility(legal.abilityId)) return;
+      }
       if (!legal) return;
-      active.submitCommand({
+      if (abilityArmed === 'push' && !legal.push) return;
+      if (
+        abilityArmed &&
+        abilityArmed !== 'push' &&
+        legal.abilityId !== abilityArmed
+      ) {
+        return;
+      }
+
+      const ok = active.submitCommand({
         type: 'move',
         from: selected,
         to,
         ...(legal.abilityId !== undefined ? { abilityId: legal.abilityId } : {}),
+        ...(legal.push ? { push: true } : {}),
       });
-      set({ selected: null });
+      if (!ok) return;
+      set({ selected: null, abilityArmed: null });
+    },
+    finishExtraMove: () => {
+      const { battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying } =
+        get();
+      if (endBanner || state.phase === 'gameOver' || state.phase !== 'play') return;
+      if (battleMode === 'ai' && !aiPlaying) return;
+      if (!state.extraMovePieceId) return;
+      const piece = state.pieces.find((p) => p.id === state.extraMovePieceId);
+      if (!piece || !canControl(piece.owner)) return;
+      if (state.activePlayer !== piece.owner) return;
+
+      const active = battleMode === 'online' ? o : s;
+      const ok = active.submitCommand({ type: 'endTurn' });
+      if (!ok) return;
+      set({ selected: null, abilityArmed: null });
     },
     startAiMatch: () => {
       const { repo: r, activeDeckId, session: s, aiStrength, aiTimePreset } = get();
@@ -477,18 +576,20 @@ export const useAppStore = create<AppStore>((set, get) => {
       }
       s.setAiStrength(aiStrength);
       s.restart(deck);
+      const startState = s.getState();
       const ms = timePresetMs(aiTimePreset);
+      const openingHistory = openingSkipEntries(startState);
       set({
         aiPlaying: true,
         selected: null,
-        moveHistory: [],
+        moveHistory: openingHistory,
         lastMove: null,
         captures: { white: [], black: [] },
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),
-        clocks: freshClocks('white', ms),
-        state: s.getState(),
+        clocks: freshClocks(startState.activePlayer, ms),
+        state: startState,
         view: 'battle',
         battleMode: 'ai',
       });

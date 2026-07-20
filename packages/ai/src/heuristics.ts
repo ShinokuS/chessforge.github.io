@@ -48,6 +48,13 @@ export function featureModBonus(def: PieceDefinition): number {
     b += Math.min(40, def.captureOffsets.length * 12);
   }
 
+  if (def.marshAuraRadius) b += 55 + def.marshAuraRadius * 20;
+  if (def.royalEscort) b += 35;
+  if (def.doubleMoveOnce) b += 75;
+  if (def.spikePlacer) b += 45;
+  if (def.postMoveFreezeTurns) b -= def.postMoveFreezeTurns * 12;
+  if (def.skipFirstTurn) b -= 40;
+
   const rich = movementRichness(def.movement);
   // Relative to a typical base of the same role (~8–16).
   b += Math.max(-40, Math.min(70, (rich - 10) * 4));

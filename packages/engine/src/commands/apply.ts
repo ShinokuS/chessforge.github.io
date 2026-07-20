@@ -3,7 +3,7 @@ import type { PlayerId } from '../board/types.js';
 import { findCavePartner, getTileDef, isPassable } from '../board/board.js';
 import { getPieceDefinition } from '../defs/catalog.js';
 import type { AbilityId, MatchState, PieceInstance } from '../match/types.js';
-import { findLegalMove } from '../pieces/movement.js';
+import { findLegalMove, getLegalMovesForPiece } from '../pieces/movement.js';
 import type { ApplyResult, GameCommand, GameEvent } from './types.js';
 
 function cloneState(state: MatchState): MatchState {
@@ -19,6 +19,11 @@ function cloneState(state: MatchState): MatchState {
       abilitiesUsed: { ...p.abilitiesUsed },
       abilityCooldowns: { ...(p.abilityCooldowns ?? {}) },
     })),
+    extraMovePieceId: state.extraMovePieceId ?? null,
+    ...(state.skipFirstTurnUsed ? { skipFirstTurnUsed: { ...state.skipFirstTurnUsed } } : {}),
+    ...(state.openingSkipSequence
+      ? { openingSkipSequence: [...state.openingSkipSequence] }
+      : {}),
   };
 }
 
@@ -194,8 +199,71 @@ function applyEnterTile(
   }
 }
 
-function endTurn(state: MatchState, events: GameEvent[]): void {
+function shouldSkipFirstTurn(state: MatchState, player: PlayerId): boolean {
+  const used = state.skipFirstTurnUsed?.[player] ?? false;
+  if (used) return false;
+  const hasSkipPiece = state.pieces.some(
+    (p) => p.owner === player && getPieceDefinition(p.defId).skipFirstTurn,
+  );
+  if (!hasSkipPiece) return false;
+  const movedAlready = state.pieces.some((p) => p.owner === player && p.hasMoved);
+  return !movedAlready;
+}
+
+function markSkipUsed(state: MatchState, player: PlayerId): void {
+  state.skipFirstTurnUsed = {
+    ...(state.skipFirstTurnUsed ?? {}),
+    [player]: true,
+  };
+}
+
+/** Cleric passive: once per match, +1 HP to the first allied piece ahead (mover's side). */
+function resolveClericFrontBless(state: MatchState, events: GameEvent[]): void {
+  for (const cleric of state.pieces) {
+    if (cleric.owner !== state.activePlayer) continue;
+    const def = getPieceDefinition(cleric.defId);
+    if (!def.abilities?.some((a) => a.id === 'frontBless')) continue;
+    if (cleric.abilitiesUsed.frontBless) continue;
+
+    const fwd = facingSign(cleric.owner);
+    let target: PieceInstance | null = null;
+    for (let step = 1; step < 8; step++) {
+      const pos = { x: cleric.pos.x, y: cleric.pos.y + fwd * step };
+      if (!inBounds(pos, state.board.width, state.board.height)) break;
+      const hit = state.pieces.find((p) => coordsEqual(p.pos, pos));
+      if (!hit) continue;
+      if (hit.owner !== cleric.owner) break;
+      target = hit;
+      break;
+    }
+    if (!target) continue;
+
+    target.hp += 1;
+    cleric.abilitiesUsed = { ...cleric.abilitiesUsed, frontBless: true };
+    events.push({ type: 'AbilityUsed', pieceId: cleric.id, abilityId: 'frontBless' });
+    events.push({
+      type: 'Healed',
+      pieceId: target.id,
+      byPieceId: cleric.id,
+      at: { ...target.pos },
+      hp: target.hp,
+    });
+  }
+}
+
+function doSingleTurnSwitch(state: MatchState, events: GameEvent[]): void {
+  // A forced mid-turn sequence must not leak into the opponent's turn.
+  if (state.extraMovePieceId) {
+    const armed = state.pieces.find((p) => p.id === state.extraMovePieceId);
+    if (armed) armed.doubleMoveArmed = false;
+    state.extraMovePieceId = null;
+  }
+
   const previous = state.activePlayer;
+
+  for (const p of state.pieces) {
+    if ((p.invisibleTurns ?? 0) > 0) p.invisibleTurns = (p.invisibleTurns ?? 0) - 1;
+  }
 
   for (const p of state.pieces) {
     if (p.owner !== previous) continue;
@@ -226,6 +294,21 @@ function endTurn(state: MatchState, events: GameEvent[]): void {
   });
   resolveWindPushes(state, next, events);
   resolveSpikeDeathsFor(state, next, events);
+}
+
+function endTurn(state: MatchState, events: GameEvent[]): void {
+  if (state.phase === 'play' && shouldSkipFirstTurn(state, state.activePlayer)) {
+    const skipped = state.activePlayer;
+    markSkipUsed(state, skipped);
+    events.push({ type: 'TurnSkipped', player: skipped, reason: 'skipFirstTurn' });
+  }
+  doSingleTurnSwitch(state, events);
+  while (state.phase === 'play' && shouldSkipFirstTurn(state, state.activePlayer)) {
+    const skipped = state.activePlayer;
+    markSkipUsed(state, skipped);
+    events.push({ type: 'TurnSkipped', player: skipped, reason: 'skipFirstTurn' });
+    doSingleTurnSwitch(state, events);
+  }
 }
 
 function maybeGameOver(state: MatchState, events: GameEvent[]): void {
@@ -270,6 +353,7 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
     abilityId: AbilityId;
     turns: number;
   } | null = null;
+  let pendingPostMoveFreeze: { pieceId: string; turns: number } | null = null;
 
   if (command.type === 'endTurn') {
     endTurn(next, events);
@@ -286,9 +370,15 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       return { ok: false, code: 'not_your_turn', message: 'Piece does not belong to active player' };
     }
 
-    const legal = findLegalMove(next, command.from, command.to, command.abilityId);
-    const legalFallback =
-      legal ?? findLegalMove(next, command.from, command.to);
+    let deferEndTurn = false;
+    const legal = findLegalMove(
+      next,
+      command.from,
+      command.to,
+      command.abilityId,
+      command.push,
+    );
+    const legalFallback = legal ?? findLegalMove(next, command.from, command.to);
     if (!legalFallback) {
       return { ok: false, code: 'illegal', message: 'Move is not legal' };
     }
@@ -296,9 +386,16 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       ? legalFallback.abilityId === command.abilityId
         ? legalFallback
         : findLegalMove(next, command.from, command.to, command.abilityId)
-      : legalFallback;
+      : command.push
+        ? legalFallback.push
+          ? legalFallback
+          : findLegalMove(next, command.from, command.to, undefined, true)
+        : legalFallback;
     if (!chosen) {
       return { ok: false, code: 'illegal', message: 'Move is not legal' };
+    }
+    if (command.push && !chosen.push) {
+      return { ok: false, code: 'illegal', message: 'Push is not legal' };
     }
 
     if (chosen.abilityId) {
@@ -379,21 +476,6 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       });
       applyEnterTile(next, piece, events);
       applyEnterTile(next, target, events);
-    } else if (chosen.abilityId === 'blessHeal' && chosen.targetPieceId) {
-      const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
-      if (!target) {
-        return { ok: false, code: 'illegal', message: 'Heal target missing' };
-      }
-      const maxHp = getPieceDefinition(target.defId).maxHp;
-      target.hp = Math.min(maxHp, target.hp + 1);
-      piece.hasMoved = true;
-      events.push({
-        type: 'Healed',
-        pieceId: target.id,
-        byPieceId: piece.id,
-        at: { ...target.pos },
-        hp: target.hp,
-      });
     } else if (chosen.abilityId === 'abdicate' && chosen.targetPieceId) {
       const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
       if (!target) {
@@ -438,6 +520,87 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
         pieceId: target.id,
         byPieceId: piece.id,
       });
+    } else if (
+      (chosen.abilityId === 'blessHeal' ||
+        chosen.abilityId === 'frontBless' ||
+        chosen.abilityId === 'judgeBless') &&
+      chosen.targetPieceId
+    ) {
+      const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+      if (!target) {
+        return { ok: false, code: 'illegal', message: 'Heal target missing' };
+      }
+      // Temporary overheal is allowed (same as mushroom tiles).
+      target.hp += 1;
+      piece.hasMoved = true;
+      events.push({
+        type: 'Healed',
+        pieceId: target.id,
+        byPieceId: piece.id,
+        at: { ...target.pos },
+        hp: target.hp,
+      });
+    } else if (chosen.abilityId === 'curseEnemy' && chosen.targetPieceId) {
+      const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+      if (!target) {
+        return { ok: false, code: 'illegal', message: 'Curse target missing' };
+      }
+      if (target.owner === piece.owner) {
+        return { ok: false, code: 'illegal', message: 'Cannot curse an ally' };
+      }
+      target.cursedCannotHarmId = piece.id;
+      piece.hasMoved = true;
+      events.push({
+        type: 'Cursed',
+        pieceId: target.id,
+        byPieceId: piece.id,
+        cannotHarmPieceId: piece.id,
+      });
+    } else if (chosen.abilityId === 'cloakPawn' && chosen.targetPieceId) {
+      const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+      if (!target) {
+        return { ok: false, code: 'illegal', message: 'Cloak target missing' };
+      }
+      if (getPieceDefinition(target.defId).baseRole !== 'pawn') {
+        return { ok: false, code: 'illegal', message: 'Cloak requires a pawn' };
+      }
+      target.invisibleTurns = 4;
+      piece.hasMoved = true;
+      events.push({
+        type: 'Cloaked',
+        pieceId: target.id,
+        byPieceId: piece.id,
+        turns: 4,
+      });
+    } else if (chosen.abilityId === 'spikeTile') {
+      const row = next.board.tiles[command.to.y];
+      if (!row) {
+        return { ok: false, code: 'illegal', message: 'Invalid tile' };
+      }
+      if (row[command.to.x] !== 'plain') {
+        return { ok: false, code: 'illegal', message: 'Only plain tiles can become spikes' };
+      }
+      row[command.to.x] = 'spikes';
+      piece.hasMoved = true;
+      events.push({
+        type: 'TileChanged',
+        at: { ...command.to },
+        fromTileId: 'plain',
+        toTileId: 'spikes',
+        byPieceId: piece.id,
+      });
+      const occupant = next.pieces.find((p) => coordsEqual(p.pos, command.to));
+      if (occupant) {
+        occupant.spikeArmed = true;
+        occupant.spikeTicks = 0;
+        events.push({
+          type: 'TileTriggered',
+          tileId: 'spikes',
+          pieceId: occupant.id,
+          at: { ...command.to },
+          note: 'armed',
+        });
+      }
     } else {
       let moved = true;
       const moverDef = getPieceDefinition(piece.defId);
@@ -445,6 +608,13 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
       if (chosen.captures && chosen.targetPieceId) {
         const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
         if (target) {
+          if (piece.cursedCannotHarmId && target.id === piece.cursedCannotHarmId) {
+            return {
+              ok: false,
+              code: 'illegal',
+              message: 'Cursed piece cannot harm this bishop',
+            };
+          }
           if (hasShield(target)) {
             return { ok: false, code: 'illegal', message: 'Target is shielded by forest' };
           }
@@ -539,6 +709,47 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
         });
         applyEnterTile(next, piece, events);
         tryPromote(next, piece, events);
+
+        if (moverDef.postMoveFreezeTurns) {
+          pendingPostMoveFreeze = {
+            pieceId: piece.id,
+            turns: moverDef.postMoveFreezeTurns,
+          };
+        }
+
+        if (moverDef.doubleMoveOnce && !piece.abilitiesUsed.doubleMove) {
+          if (piece.doubleMoveArmed) {
+            piece.doubleMoveArmed = false;
+            next.extraMovePieceId = null;
+            piece.abilitiesUsed = { ...piece.abilitiesUsed, doubleMove: true };
+            pendingPostMoveFreeze = {
+              pieceId: piece.id,
+              turns: moverDef.doubleMoveOnce.freezeAfter,
+            };
+            events.push({
+              type: 'AbilityUsed',
+              pieceId: piece.id,
+              abilityId: 'doubleMove',
+            });
+          } else {
+            piece.doubleMoveArmed = true;
+            next.extraMovePieceId = piece.id;
+            const followUps = getLegalMovesForPiece(next, piece);
+            if (followUps.length === 0) {
+              // No second move available — spend the charge without freezing.
+              piece.doubleMoveArmed = false;
+              next.extraMovePieceId = null;
+              piece.abilitiesUsed = { ...piece.abilitiesUsed, doubleMove: true };
+              events.push({
+                type: 'AbilityUsed',
+                pieceId: piece.id,
+                abilityId: 'doubleMove',
+              });
+            } else {
+              deferEndTurn = true;
+            }
+          }
+        }
       } else if (stillAlive) {
         piece.hasMoved = true;
       }
@@ -546,6 +757,9 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
 
     maybeGameOver(next, events);
     if (next.phase === 'play') {
+      resolveClericFrontBless(next, events);
+    }
+    if (next.phase === 'play' && !deferEndTurn) {
       endTurn(next, events);
       if (pendingFreezeCooldown) {
         const freezer = next.pieces.find((p) => p.id === pendingFreezeCooldown!.pieceId);
@@ -558,6 +772,15 @@ export function applyCommand(state: MatchState, command: GameCommand): ApplyResu
             ...caster.abilityCooldowns,
             [pendingAbilityCooldown.abilityId]: pendingAbilityCooldown.turns,
           };
+        }
+      }
+      if (pendingPostMoveFreeze) {
+        const frozen = next.pieces.find((p) => p.id === pendingPostMoveFreeze!.pieceId);
+        if (frozen) {
+          frozen.frozenTurns = Math.max(
+            frozen.frozenTurns ?? 0,
+            pendingPostMoveFreeze.turns,
+          );
         }
       }
       maybeGameOver(next, events);

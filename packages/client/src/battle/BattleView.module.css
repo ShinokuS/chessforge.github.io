@@ -83,6 +83,27 @@
   border-color: var(--danger);
 }
 
+.finishTurn {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg2));
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  color: var(--ink);
+  padding: 0.55rem 1rem;
+  border-radius: 2px;
+  font-weight: 600;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.finishTurn:hover {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg2));
+  border-color: var(--accent);
+}
+
+.extraMoveHint {
+  margin: 0.35rem 0 0;
+  font-size: 0.88rem;
+  color: var(--accent);
+}
+
 .lobby {
   display: flex;
   flex-direction: column;
@@ -300,10 +321,12 @@
 
 .roomCode {
   margin: 0.2rem 0 0;
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   font-size: 1.85rem;
-  letter-spacing: 0.12em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
 }
 
 .roomHint {
@@ -608,7 +631,7 @@
 }
 
 .clockTime {
-  font-family: var(--font-display);
+  font-family: var(--font-body);
   font-size: 1.65rem;
   font-weight: 700;
   line-height: 1;

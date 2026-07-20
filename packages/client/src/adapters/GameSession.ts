@@ -98,7 +98,9 @@ export class GameSession {
     }
     this.lastError = null;
     this.state = result.state;
-    if (command.type === 'move') {
+    // Record moves and explicit endTurn (Wayfarer declining the second half)
+    // so post-game analysis can replay the exact sequence.
+    if (command.type === 'move' || command.type === 'endTurn') {
       this.recordedCommands.push(structuredClone(command));
     }
     this.emit(result.events);
@@ -115,22 +117,32 @@ export class GameSession {
   }
 
   private async runAi(): Promise<void> {
+    if (this.aiBusy) return;
     this.aiBusy = true;
-    const opts = { ...this.aiOptions };
-    // Let React paint the player's move before workers spin up.
-    await new Promise((r) => setTimeout(r, 16));
-    if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') {
-      this.aiBusy = false;
-      return;
-    }
     try {
-      const cmd = await getAiPool().chooseCommand(this.state, opts);
-      if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') return;
-      this.submitCommand(cmd);
-    } catch (err) {
-      console.error('AI search failed', err);
-      this.lastError = 'ИИ не смог сделать ход';
-      this.emit([]);
+      // Wayfarer (and similar) can keep the same side to move for a second action.
+      // Loop until it's no longer black's turn — otherwise aiBusy blocks the follow-up.
+      while (
+        this.mode === 'offline-ai' &&
+        this.state.phase === 'play' &&
+        this.state.activePlayer === 'black'
+      ) {
+        const opts = { ...this.aiOptions };
+        // Let React paint before workers spin up.
+        await new Promise((r) => setTimeout(r, 16));
+        if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') break;
+        try {
+          const cmd = await getAiPool().chooseCommand(this.state, opts);
+          if (this.state.phase !== 'play' || this.state.activePlayer !== 'black') break;
+          const ok = this.submitCommand(cmd);
+          if (!ok) break;
+        } catch (err) {
+          console.error('AI search failed', err);
+          this.lastError = 'ИИ не смог сделать ход';
+          this.emit([]);
+          break;
+        }
+      }
     } finally {
       this.aiBusy = false;
     }

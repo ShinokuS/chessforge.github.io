@@ -26,7 +26,7 @@ function partitionMoves<T>(items: T[], parts: number): T[][] {
 }
 
 function moveKey(m: LegalMove): string {
-  return `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.abilityId ?? ''}:${m.captures ? 1 : 0}`;
+  return `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.abilityId ?? ''}:${m.captures ? 1 : 0}:${m.push ? 1 : 0}`;
 }
 
 function rootNoise(m: LegalMove, skill: number, depth: number): number {
@@ -51,6 +51,7 @@ function moveToCommand(m: LegalMove): GameCommand {
     from: { ...m.from },
     to: { ...m.to },
     ...(m.abilityId !== undefined ? { abilityId: m.abilityId } : {}),
+    ...(m.push ? { push: true } : {}),
   };
 }
 

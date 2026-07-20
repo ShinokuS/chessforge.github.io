@@ -3,6 +3,7 @@ import { generateSymmetricBattlefield } from '../board/generate.js';
 import { getPieceDefinition } from '../defs/catalog.js';
 import type { Coord, PlayerId } from '../board/types.js';
 import type { MatchConfig, MatchState, PieceInstance } from './types.js';
+import { applyCommand } from '../commands/apply.js';
 import {
   classicBasePlacements,
   getFormationSlot,
@@ -41,6 +42,8 @@ export function createPieceInstance(
     isRoyal: def.baseRole === 'king',
     reflectAvailable: Boolean(def.reflectDamageOnce),
     promotesToBaseQueen: false,
+    invisibleTurns: 0,
+    doubleMoveArmed: false,
   };
 }
 
@@ -62,6 +65,11 @@ export function createMatch(config: MatchConfig): MatchState {
       reflectAvailable:
         p.reflectAvailable ?? Boolean(getPieceDefinition(p.defId).reflectDamageOnce),
       promotesToBaseQueen: p.promotesToBaseQueen ?? false,
+      ...(p.cursedCannotHarmId !== undefined
+        ? { cursedCannotHarmId: p.cursedCannotHarmId }
+        : {}),
+      invisibleTurns: p.invisibleTurns ?? 0,
+      doubleMoveArmed: p.doubleMoveArmed ?? false,
     })),
     activePlayer: config.activePlayer ?? 'white',
     turn: 1,
@@ -69,7 +77,35 @@ export function createMatch(config: MatchConfig): MatchState {
     winner: null,
     seed: config.seed ?? 1,
     rngStep: 0,
+    extraMovePieceId: null,
+    skipFirstTurnUsed: { white: false, black: false },
   };
+}
+
+function sideSkipsFirstTurn(state: MatchState, owner: PlayerId): boolean {
+  return state.pieces.some(
+    (p) => p.owner === owner && getPieceDefinition(p.defId).skipFirstTurn,
+  );
+}
+
+function applyOpeningPass(state: MatchState): MatchState {
+  let current = state;
+  if (current.turn === 1 && sideSkipsFirstTurn(current, current.activePlayer)) {
+    const pass = applyCommand(current, { type: 'endTurn' });
+    if (pass.ok) {
+      current = pass.state;
+      const skipped = pass.events
+        .filter(
+          (e): e is { type: 'TurnSkipped'; player: PlayerId; reason: 'skipFirstTurn' } =>
+            e.type === 'TurnSkipped' && e.reason === 'skipFirstTurn',
+        )
+        .map((e) => e.player);
+      if (skipped.length > 0) {
+        current.openingSkipSequence = skipped;
+      }
+    }
+  }
+  return current;
 }
 
 export function spawnFromPlacements(
@@ -109,14 +145,16 @@ export function createBattlefieldBoard() {
 export function createDemoMatch(): MatchState {
   resetPieceIdCounter(1);
   const placements = classicBasePlacements();
-  return createMatch({
-    board: createBattlefieldBoard(),
-    pieces: [
-      ...spawnFromPlacements(placements, 'white'),
-      ...spawnFromPlacements(placements, 'black'),
-    ],
-    seed: 42,
-  });
+  return applyOpeningPass(
+    createMatch({
+      board: createBattlefieldBoard(),
+      pieces: [
+        ...spawnFromPlacements(placements, 'white'),
+        ...spawnFromPlacements(placements, 'black'),
+      ],
+      seed: 42,
+    }),
+  );
 }
 
 export function createMatchFromPlacements(
@@ -125,14 +163,16 @@ export function createMatchFromPlacements(
   seed = 7,
 ): MatchState {
   resetPieceIdCounter(1);
-  return createMatch({
-    board: generateSymmetricBattlefield(seed),
-    pieces: [
-      ...spawnFromPlacements(white, 'white'),
-      ...spawnFromPlacements(black, 'black'),
-    ],
-    seed,
-  });
+  return applyOpeningPass(
+    createMatch({
+      board: generateSymmetricBattlefield(seed),
+      pieces: [
+        ...spawnFromPlacements(white, 'white'),
+        ...spawnFromPlacements(black, 'black'),
+      ],
+      seed,
+    }),
+  );
 }
 
 export function deckCost(placements: ReadonlyArray<FormationPlacement>): number {

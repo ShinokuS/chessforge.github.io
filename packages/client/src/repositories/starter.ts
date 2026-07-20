@@ -29,6 +29,16 @@ export const STARTER_COLLECTION: OwnedCard[] = [
   { defId: 'spearman', count: 2 },
   { defId: 'ram', count: 2 },
   { defId: 'bristling', count: 2 },
+  { defId: 'cleric', count: 1 },
+  { defId: 'quagmire', count: 1 },
+  { defId: 'sluggard', count: 1 },
+  { defId: 'hexer', count: 1 },
+  { defId: 'wayfarer', count: 1 },
+  { defId: 'escort', count: 1 },
+  { defId: 'juggernaut', count: 1 },
+  { defId: 'thornqueen', count: 1 },
+  { defId: 'veilqueen', count: 1 },
+  { defId: 'judge', count: 1 },
 ];
 
 export const STARTER_DECK: Deck = {
