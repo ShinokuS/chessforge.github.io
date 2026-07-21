@@ -580,14 +580,14 @@ export const dynastDef: PieceDefinition = {
   ],
 };
 
-/** Ход только на 1 вперёд; раз за матч авто +1 HP первой союзной фигуре впереди. */
+/** Ход только на 1 вперёд; раз за матч авто +1 HP союзнику на клетке прямо перед собой. */
 export const clericDef: PieceDefinition = {
   id: 'cleric',
   name: 'Клерик',
   baseRole: 'pawn',
   isBase: false,
   description:
-    'Модификация пешки: ходит только на 1 клетку вперёд. Один раз за партию автоматически даёт +1 HP первой союзной фигуре по линии прямо перед собой (даже если она уже на максимуме HP).',
+    'Модификация пешки: ходит только на 1 клетку вперёд. Один раз за партию автоматически даёт +1 HP союзной фигуре на клетке непосредственно перед собой (даже если она уже на максимуме HP).',
   cost: 3,
   rarity: 'uncommon',
   maxHp: 1,
@@ -601,7 +601,7 @@ export const clericDef: PieceDefinition = {
   abilities: [
     {
       id: 'frontBless',
-      description: 'Пассивно раз за матч: +1 HP первой союзной фигуре впереди.',
+      description: 'Пассивно раз за матч: +1 HP союзнику на клетке прямо перед собой.',
     },
   ],
 };
@@ -636,6 +636,20 @@ export const sluggardDef: PieceDefinition = {
   attack: 1,
   skipFirstTurn: true,
   movement: [{ kind: 'slide', directions: ORTHO, maxRange: 8 }],
+};
+
+/** Атаки наносят 2 HP за удар. */
+export const reaverDef: PieceDefinition = {
+  id: 'reaver',
+  name: 'Каратель',
+  baseRole: 'bishop',
+  isBase: false,
+  description: 'Модификация слона: обычные ходы. Каждая атака наносит 2 HP.',
+  cost: 4,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 2,
+  movement: [{ kind: 'slide', directions: DIAG, maxRange: 8 }],
 };
 
 /** Раз за матч проклятие: враг не может вредить этому слону. */
@@ -675,6 +689,27 @@ export const wayfarerDef: PieceDefinition = {
   movement: [{ kind: 'slide', directions: DIAG, maxRange: 8 }],
 };
 
+/** Раз за матч бросок копья: 2 HP по врагу на клетке конь-хода, без перемещения. */
+export const javelinDef: PieceDefinition = {
+  id: 'javelin',
+  name: 'Копьеносец',
+  baseRole: 'knight',
+  isBase: false,
+  description:
+    'Модификация коня: обычные прыжки. Один раз за партию может вместо хода метнуть копье — нанести 2 HP вражеской фигуре на любой доступной клетке коня, оставаясь на месте.',
+  cost: 4,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'leap', offsets: KNIGHT_OFFSETS }],
+  abilities: [
+    {
+      id: 'throwSpear',
+      description: 'Один раз: копьё — 2 HP по врагу на клетке конь-хода.',
+    },
+  ],
+};
+
 /** Рядом с королём ходит ещё и как король. */
 export const escortDef: PieceDefinition = {
   id: 'escort',
@@ -705,6 +740,27 @@ export const juggernautDef: PieceDefinition = {
   attack: 1,
   postMoveFreezeTurns: 1,
   movement: [{ kind: 'leap', offsets: KNIGHT_OFFSETS }],
+};
+
+/** Раз за матч снимает все бонусные HP у вражеской фигуры (до 1). */
+export const hearteaterDef: PieceDefinition = {
+  id: 'hearteater',
+  name: 'Сердцеедка',
+  baseRole: 'queen',
+  isBase: false,
+  description:
+    'Модификация ферзя: обычные ходы. Один раз за партию может снять все бонусные HP у любой вражеской фигуры — остаётся 1 HP.',
+  cost: 3,
+  rarity: 'uncommon',
+  maxHp: 1,
+  attack: 1,
+  movement: [{ kind: 'slide', directions: ALL_DIRS, maxRange: 8 }],
+  abilities: [
+    {
+      id: 'heartEat',
+      description: 'Один раз: снять бонусные HP у вражеской фигуры (до 1 HP).',
+    },
+  ],
 };
 
 /** Превращает равнину в шипы; фигура на клетке погибнет, если не уйдёт. */
@@ -784,14 +840,17 @@ export const PIECE_DEFS = [
   aegisDef,
   knightDef,
   lancerDef,
+  javelinDef,
   outriderDef,
   courserDef,
   bishopDef,
   chaplainDef,
+  reaverDef,
   exchangerDef,
   bastionDef,
   queenDef,
   regentDef,
+  hearteaterDef,
   cryomancerDef,
   patronDef,
   kingDef,

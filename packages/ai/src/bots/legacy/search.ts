@@ -7,8 +7,8 @@ import {
   type LegalMove,
   type MatchState,
 } from '@chessforge/engine';
-import { evaluate, pieceTacticalValue, isKingEnPrise } from './evaluate.js';
-import { hashPosition } from './zobrist.js';
+import { evaluate, pieceTacticalValue, isKingEnPrise } from '../../evaluate.js';
+import { hashPosition } from '../../zobrist.js';
 
 const DEFAULT_MAX_DEPTH = 4;
 const DEFAULT_TIME_MS = 400;

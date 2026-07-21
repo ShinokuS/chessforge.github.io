@@ -260,7 +260,7 @@ function markSkipUsed(state: MatchState, player: PlayerId): void {
   };
 }
 
-/** Cleric passive: once per match, +1 HP to the first allied piece ahead (mover's side). */
+/** Cleric passive: once per match, +1 HP to an ally on the square directly ahead. */
 function resolveClericFrontBless(state: MatchState, events: GameEvent[]): void {
   for (const cleric of state.pieces) {
     if (cleric.owner !== state.activePlayer) continue;
@@ -269,27 +269,20 @@ function resolveClericFrontBless(state: MatchState, events: GameEvent[]): void {
     if (cleric.abilitiesUsed.frontBless) continue;
 
     const fwd = facingSign(cleric.owner);
-    let target: PieceInstance | null = null;
-    for (let step = 1; step < 8; step++) {
-      const pos = { x: cleric.pos.x, y: cleric.pos.y + fwd * step };
-      if (!inBounds(pos, state.board.width, state.board.height)) break;
-      const hit = state.pieces.find((p) => coordsEqual(p.pos, pos));
-      if (!hit) continue;
-      if (hit.owner !== cleric.owner) break;
-      target = hit;
-      break;
-    }
-    if (!target) continue;
+    const pos = { x: cleric.pos.x, y: cleric.pos.y + fwd };
+    if (!inBounds(pos, state.board.width, state.board.height)) continue;
+    const hit = state.pieces.find((p) => coordsEqual(p.pos, pos));
+    if (!hit || hit.owner !== cleric.owner) continue;
 
-    target.hp += 1;
+    hit.hp += 1;
     cleric.abilitiesUsed = { ...cleric.abilitiesUsed, frontBless: true };
     events.push({ type: 'AbilityUsed', pieceId: cleric.id, abilityId: 'frontBless' });
     events.push({
       type: 'Healed',
-      pieceId: target.id,
+      pieceId: hit.id,
       byPieceId: cleric.id,
-      at: { ...target.pos },
-      hp: target.hp,
+      at: { ...hit.pos },
+      hp: hit.hp,
     });
   }
 }
@@ -646,6 +639,106 @@ function applyCommandImpl(
         byPieceId: piece.id,
         cannotHarmPieceId: piece.id,
       });
+    } else if (chosen.abilityId === 'heartEat' && chosen.targetPieceId) {
+      const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+      if (!target) {
+        return { ok: false, code: 'illegal', message: 'Heart eat target missing' };
+      }
+      if (target.owner === piece.owner) {
+        return { ok: false, code: 'illegal', message: 'Cannot strip HP from an ally' };
+      }
+      if (target.hp <= 1) {
+        return { ok: false, code: 'illegal', message: 'Target has no bonus HP' };
+      }
+      target.hp = 1;
+      piece.hasMoved = true;
+      events.push({
+        type: 'BonusHpStripped',
+        pieceId: target.id,
+        byPieceId: piece.id,
+        at: { ...target.pos },
+        hp: target.hp,
+      });
+    } else if (chosen.abilityId === 'throwSpear' && chosen.targetPieceId) {
+      let target = next.pieces.find((p) => p.id === chosen.targetPieceId);
+      if (!target) {
+        return { ok: false, code: 'illegal', message: 'Spear target missing' };
+      }
+      if (target.owner === piece.owner) {
+        return { ok: false, code: 'illegal', message: 'Cannot throw spear at an ally' };
+      }
+      target = mut(target);
+      if (hasShield(target)) {
+        return { ok: false, code: 'illegal', message: 'Target is shielded by forest' };
+      }
+      if (piece.cursedCannotHarmId && target.id === piece.cursedCannotHarmId) {
+        return {
+          ok: false,
+          code: 'illegal',
+          message: 'Cursed piece cannot harm this bishop',
+        };
+      }
+      const spearFrom = { ...piece.pos };
+      const damage = 2;
+      target.hp -= damage;
+      const reflect =
+        target.reflectAvailable && damage > 0
+          ? (() => {
+              target.reflectAvailable = false;
+              return damage;
+            })()
+          : 0;
+
+      piece.hasMoved = true;
+      if (target.hp <= 0) {
+        events.push({
+          type: 'SpearThrown',
+          byPieceId: piece.id,
+          targetPieceId: target.id,
+          from: spearFrom,
+          at: { ...target.pos },
+        });
+        events.push({
+          type: 'Captured',
+          pieceId: target.id,
+          byPieceId: piece.id,
+          at: { ...target.pos },
+          defId: target.defId,
+        });
+        destroyPiece(next, target.id, events, 'capture');
+      } else {
+        events.push({
+          type: 'SpearThrown',
+          byPieceId: piece.id,
+          targetPieceId: target.id,
+          from: spearFrom,
+          at: { ...target.pos },
+          hpLeft: target.hp,
+        });
+      }
+
+      if (reflect > 0) {
+        const attacker = next.pieces.find((p) => p.id === piece.id);
+        if (attacker) {
+          attacker.hp -= reflect;
+          events.push({
+            type: 'Reflected',
+            pieceId: attacker.id,
+            byPieceId: target.id,
+            damage: reflect,
+          });
+          if (attacker.hp <= 0) {
+            events.push({
+              type: 'Captured',
+              pieceId: attacker.id,
+              byPieceId: target.id,
+              at: { ...attacker.pos },
+              defId: attacker.defId,
+            });
+            destroyPiece(next, attacker.id, events, 'reflect');
+          }
+        }
+      }
     } else if (chosen.abilityId === 'cloakPawn' && chosen.targetPieceId) {
       const target = next.pieces.find((p) => p.id === chosen.targetPieceId);
       if (!target) {

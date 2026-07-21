@@ -253,6 +253,10 @@ function abilitySuffix(abilityId: string | undefined): string {
       return ' (шипы)';
     case 'judgeBless':
       return ' (приговор)';
+    case 'heartEat':
+      return ' (сердцеедка)';
+    case 'throwSpear':
+      return ' (копье)';
     case 'frontBless':
       return ' (клерик)';
     default:

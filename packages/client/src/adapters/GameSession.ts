@@ -1,4 +1,4 @@
-import { buildAiDeck, type ChooseOptions } from '@chessforge/ai';
+import { buildAiDeck, clampBotId, DEFAULT_BOT_ID, type BotId, type ChooseOptions } from '@chessforge/ai';
 import {
   applyCommand,
   createDemoMatch,
@@ -34,7 +34,9 @@ export class GameSession {
   private listeners = new Set<GameSessionListener>();
   private lastError: string | null = null;
   private aiBusy = false;
-  private aiOptions: ChooseOptions = aiChooseOptions(6);
+  private aiStrength: AiStrengthLevel = 6;
+  private aiBotId: BotId = DEFAULT_BOT_ID;
+  private aiOptions: ChooseOptions = aiChooseOptions(6, DEFAULT_BOT_ID);
   /** Position at match start (for post-game analysis). */
   private openingState: MatchState | null = null;
   /** Player/AI commands applied this match, in order. */
@@ -68,7 +70,17 @@ export class GameSession {
   }
 
   setAiStrength(strength: AiStrengthLevel): void {
-    this.aiOptions = aiChooseOptions(clampAiStrength(strength));
+    this.aiStrength = clampAiStrength(strength);
+    this.refreshAiOptions();
+  }
+
+  setAiBot(botId: BotId): void {
+    this.aiBotId = clampBotId(botId);
+    this.refreshAiOptions();
+  }
+
+  private refreshAiOptions(): void {
+    this.aiOptions = aiChooseOptions(this.aiStrength, this.aiBotId);
   }
 
   getLegalMovesFrom(from: { x: number; y: number }) {

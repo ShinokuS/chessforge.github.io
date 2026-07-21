@@ -1,70 +1,61 @@
 import { applyCommand, type GameCommand, type LegalMove, type MatchState } from '@chessforge/engine';
-import * as legacy from './legacySearch.js';
+import {
+  chooseLegacy,
+  chooseLegacyAsync,
+  getBot,
+  searchLegacyPosition,
+} from './bots/index.js';
 import {
   INF,
-  scoreWhite,
   type FullSearchResult,
   type SearchOptions,
 } from './search/model.js';
-import {
-  chooseStockfish,
-  chooseStockfishAsync,
-  scoreCommandStockfish,
-  scoreMovesStockfish,
-  searchStockfish,
-} from './search/stockfish.js';
 
 export type ChooseOptions = SearchOptions;
 export type SearchResult = FullSearchResult;
 
-function legacyOptions(options: ChooseOptions): legacy.ChooseOptions {
-  const { engine: _engine, ...rest } = options;
-  return rest;
+function resolveBot(options: ChooseOptions) {
+  return getBot(options.engine);
 }
 
-function enrichLegacy(
-  result: legacy.SearchResult,
-  startedAt: number,
-): SearchResult {
-  const elapsedMs = Math.max(0, Date.now() - startedAt);
-  return {
-    ...result,
-    pv: [result.best],
-    depth: 0,
-    selDepth: 0,
-    nodes: 0,
-    nps: 0,
-    elapsedMs,
-    stoppedBy: 'fallback',
-  };
+/**
+ * Prefer the selected bot; on unexpected throw fall back to legacy
+ * (preserves previous stockfish→legacy safety net when bot is stockfish).
+ */
+function withLegacyFallback<T>(options: ChooseOptions, run: () => T, fallback: () => T): T {
+  if (options.engine === 'legacy') return run();
+  try {
+    return run();
+  } catch {
+    return fallback();
+  }
 }
 
 export function chooseCommand(
   state: MatchState,
   options: ChooseOptions = {},
 ): GameCommand {
-  if (options.engine === 'legacy') {
-    return legacy.chooseCommand(state, legacyOptions(options));
-  }
-  try {
-    return chooseStockfish(state, options);
-  } catch {
-    return legacy.chooseCommand(state, legacyOptions(options));
-  }
+  const bot = resolveBot(options);
+  return withLegacyFallback(
+    options,
+    () => bot.choose(state, options),
+    () => chooseLegacy(state, options),
+  );
 }
 
 export async function chooseCommandAsync(
   state: MatchState,
   options: ChooseOptions = {},
 ): Promise<GameCommand> {
-  if (options.engine === 'legacy') {
-    return legacy.chooseCommandAsync(state, legacyOptions(options));
-  }
-  try {
-    return await chooseStockfishAsync(state, options);
-  } catch {
-    return legacy.chooseCommandAsync(state, legacyOptions(options));
-  }
+  const bot = resolveBot(options);
+  return withLegacyFallback(
+    options,
+    () =>
+      bot.chooseAsync
+        ? bot.chooseAsync(state, options)
+        : Promise.resolve(bot.choose(state, options)),
+    () => chooseLegacyAsync(state, options),
+  );
 }
 
 export function scoreRootMoves(
@@ -73,14 +64,35 @@ export function scoreRootMoves(
   depth: number,
   options: ChooseOptions = {},
 ): { results: Array<{ move: LegalMove; score: number }>; completed: boolean } {
-  if (options.engine === 'legacy') {
-    return legacy.scoreRootMoves(state, moves, depth, legacyOptions(options));
-  }
-  try {
-    return scoreMovesStockfish(state, moves, depth, options);
-  } catch {
-    return legacy.scoreRootMoves(state, moves, depth, legacyOptions(options));
-  }
+  const bot = resolveBot(options);
+  return withLegacyFallback(
+    options,
+    () => {
+      if (!bot.scoreRoots) {
+        // Sequential score via search of each child — rare path for bots without rootSplit.
+        const results: Array<{ move: LegalMove; score: number }> = [];
+        for (const move of moves) {
+          const cmd: GameCommand = {
+            type: 'move',
+            from: { ...move.from },
+            to: { ...move.to },
+            ...(move.abilityId !== undefined ? { abilityId: move.abilityId } : {}),
+            ...(move.push ? { push: true } : {}),
+          };
+          const score = bot.scoreCommand
+            ? bot.scoreCommand(state, cmd, { ...options, maxDepth: depth, depth })
+            : bot.search(state, { ...options, maxDepth: depth, depth }).score;
+          results.push({ move, score });
+        }
+        return { results, completed: true };
+      }
+      return bot.scoreRoots(state, moves, depth, options);
+    },
+    () => {
+      const legacy = getBot('legacy');
+      return legacy.scoreRoots!(state, moves, depth, { ...options, engine: 'legacy' });
+    },
+  );
 }
 
 export function searchPosition(
@@ -88,21 +100,12 @@ export function searchPosition(
   options: ChooseOptions = {},
   onIteration?: (partial: SearchResult) => void,
 ): SearchResult {
-  const startedAt = Date.now();
-  if (options.engine === 'legacy') {
-    return enrichLegacy(
-      legacy.searchPosition(state, legacyOptions(options)),
-      startedAt,
-    );
-  }
-  try {
-    return searchStockfish(state, options, onIteration);
-  } catch {
-    return enrichLegacy(
-      legacy.searchPosition(state, legacyOptions(options)),
-      startedAt,
-    );
-  }
+  const bot = resolveBot(options);
+  return withLegacyFallback(
+    options,
+    () => bot.search(state, options, onIteration),
+    () => searchLegacyPosition(state, options),
+  );
 }
 
 export function searchScoreCommand(
@@ -110,15 +113,15 @@ export function searchScoreCommand(
   command: GameCommand,
   options: ChooseOptions = {},
 ): number {
-  if (options.engine === 'legacy') {
-    return legacy.searchScoreCommand(state, command, legacyOptions(options));
-  }
-  try {
-    const depth = options.maxDepth ?? options.depth ?? 4;
-    return scoreCommandStockfish(state, command, depth, options).score;
-  } catch {
-    return legacy.searchScoreCommand(state, command, legacyOptions(options));
-  }
+  const bot = resolveBot(options);
+  return withLegacyFallback(
+    options,
+    () => {
+      if (bot.scoreCommand) return bot.scoreCommand(state, command, options);
+      return bot.search(state, options).score;
+    },
+    () => getBot('legacy').scoreCommand!(state, command, { ...options, engine: 'legacy' }),
+  );
 }
 
 export function searchScoreWhiteAfter(
@@ -126,15 +129,16 @@ export function searchScoreWhiteAfter(
   command: GameCommand,
   options: ChooseOptions = {},
 ): number {
-  if (options.engine === 'legacy') {
-    return legacy.searchScoreWhiteAfter(state, command, legacyOptions(options));
-  }
-  try {
-    const applied = applyCommand(state, command);
-    if (!applied.ok) return state.activePlayer === 'white' ? -INF : INF;
-    const result = searchStockfish(applied.state, options);
-    return scoreWhite(applied.state, result.score);
-  } catch {
-    return legacy.searchScoreWhiteAfter(state, command, legacyOptions(options));
-  }
+  const bot = resolveBot(options);
+  return withLegacyFallback(
+    options,
+    () => {
+      if (bot.scoreWhiteAfter) return bot.scoreWhiteAfter(state, command, options);
+      const applied = applyCommand(state, command);
+      if (!applied.ok) return state.activePlayer === 'white' ? -INF : INF;
+      return bot.search(applied.state, options).scoreWhite;
+    },
+    () =>
+      getBot('legacy').scoreWhiteAfter!(state, command, { ...options, engine: 'legacy' }),
+  );
 }

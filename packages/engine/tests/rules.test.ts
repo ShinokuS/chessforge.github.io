@@ -857,18 +857,17 @@ describe('new piece mods', () => {
     expect(moves.some((m) => m.to.x === 5 && m.to.y === 5)).toBe(false);
   });
 
-  it('cleric auto-heals the first allied piece ahead once', () => {
+  it('cleric auto-heals an ally on the square directly ahead once', () => {
     const state = blankMatch([
       createPieceInstance('cleric', 'white', { x: 4, y: 1 }, 'cw'),
-      createPieceInstance('knight', 'white', { x: 2, y: 2 }, 'nw'),
+      createPieceInstance('knight', 'white', { x: 4, y: 2 }, 'nw'),
       createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
       createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
     ]);
-    // Knight leaps onto the file ahead of the cleric → passive heal.
     const result = applyCommand(state, {
       type: 'move',
-      from: { x: 2, y: 2 },
-      to: { x: 4, y: 3 },
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 1 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -877,7 +876,7 @@ describe('new piece mods', () => {
     expect(result.events.some((e) => e.type === 'Healed' && e.pieceId === 'nw')).toBe(true);
   });
 
-  it('cleric auto-heals the first allied piece ahead even if not adjacent', () => {
+  it('cleric does not heal allies several squares ahead', () => {
     const state = blankMatch([
       createPieceInstance('cleric', 'white', { x: 4, y: 1 }, 'cw'),
       createPieceInstance('pawn', 'white', { x: 4, y: 4 }, 'pw1'),
@@ -885,7 +884,6 @@ describe('new piece mods', () => {
       createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
       createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
     ]);
-    // Any white move should trigger the passive if an ally is already ahead.
     const result = applyCommand(state, {
       type: 'move',
       from: { x: 0, y: 0 },
@@ -893,9 +891,65 @@ describe('new piece mods', () => {
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.state.pieces.find((p) => p.id === 'pw1')?.hp).toBe(2);
+    expect(result.state.pieces.find((p) => p.id === 'pw1')?.hp).toBe(1);
     expect(result.state.pieces.find((p) => p.id === 'pw2')?.hp).toBe(1);
-    expect(result.state.pieces.find((p) => p.id === 'cw')?.abilitiesUsed.frontBless).toBe(true);
+    expect(result.state.pieces.find((p) => p.id === 'cw')?.abilitiesUsed.frontBless).toBeFalsy();
+  });
+
+  it('hearteater strips bonus HP from an enemy once', () => {
+    const state = blankMatch([
+      createPieceInstance('hearteater', 'white', { x: 3, y: 3 }, 'hq'),
+      createPieceInstance('ironclad', 'black', { x: 5, y: 5 }, 'ib'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 3, y: 3 },
+      to: { x: 5, y: 5 },
+      abilityId: 'heartEat',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'ib')?.hp).toBe(1);
+    expect(result.state.pieces.find((p) => p.id === 'hq')?.abilitiesUsed.heartEat).toBe(true);
+  });
+
+  it('reaver bishop deals 2 HP per capture', () => {
+    const state = blankMatch([
+      createPieceInstance('reaver', 'white', { x: 0, y: 0 }, 'bw'),
+      createPieceInstance('ironclad', 'black', { x: 3, y: 3 }, 'ib'),
+      createPieceInstance('king', 'white', { x: 4, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 0, y: 0 },
+      to: { x: 3, y: 3 },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.some((p) => p.id === 'ib')).toBe(false);
+  });
+
+  it('javelin throws spear for 2 HP without moving', () => {
+    const state = blankMatch([
+      createPieceInstance('javelin', 'white', { x: 2, y: 2 }, 'nw'),
+      createPieceInstance('ironclad', 'black', { x: 4, y: 3 }, 'ib'),
+      createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
+      createPieceInstance('king', 'black', { x: 7, y: 7 }, 'kb'),
+    ]);
+    const result = applyCommand(state, {
+      type: 'move',
+      from: { x: 2, y: 2 },
+      to: { x: 4, y: 3 },
+      abilityId: 'throwSpear',
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.state.pieces.find((p) => p.id === 'nw')?.pos).toEqual({ x: 2, y: 2 });
+    expect(result.state.pieces.find((p) => p.id === 'ib')).toBeUndefined();
+    expect(result.state.pieces.find((p) => p.id === 'nw')?.abilitiesUsed.throwSpear).toBe(true);
   });
 
   it('hexer curse blocks the enemy from capturing the bishop', () => {

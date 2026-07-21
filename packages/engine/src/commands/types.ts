@@ -41,6 +41,15 @@ export type GameEvent =
       to: Coord;
     }
   | { type: 'Healed'; pieceId: string; byPieceId: string; at: Coord; hp: number }
+  | { type: 'BonusHpStripped'; pieceId: string; byPieceId: string; at: Coord; hp: number }
+  | {
+      type: 'SpearThrown';
+      byPieceId: string;
+      targetPieceId: string;
+      from: Coord;
+      at: Coord;
+      hpLeft?: number;
+    }
   | { type: 'ShieldGranted'; pieceId: string; byPieceId: string; turns: number }
   | { type: 'TitleTransferred'; fromPieceId: string; toPieceId: string }
   | { type: 'Designated'; pieceId: string; byPieceId: string }

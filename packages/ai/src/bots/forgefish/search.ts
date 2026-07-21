@@ -1,27 +1,18 @@
 /**
- * Chessforge search — Stockfish-inspired PVS / iterative deepening.
- *
- * Soft time only between ID iterations; reported depth is always completed.
- * fastAnalysis = stronger LMR/LMP only (not fake depth). Client uses all threads.
+ * Forgefish — Chessforge-native PVS / iterative deepening.
+ * DPA-safe NMP, HP-SEE, selective quiescence, classic fast path when eligible.
  */
 import {
-  applyCommand,
-  applyKnownMove,
   getLegalMoves,
   getPieceDefinition,
   type GameCommand,
   type LegalMove,
   type MatchState,
 } from '@chessforge/engine';
-import { canUseClassicFastPath } from '../classic/detect.js';
-import { searchClassic } from '../classic/search.js';
-import {
-  evaluateSearch,
-  evaluateSearchFast,
-  isKingEnPriseFast,
-} from '../evaluate.js';
-import { featureModBonus, ROLE_VALUE } from '../heuristics.js';
-import { hashPosition } from '../zobrist.js';
+import { canUseClassicFastPath } from '../../classic/detect.js';
+import { searchClassic } from '../../classic/search.js';
+import { isKingEnPriseFast } from '../../evaluate.js';
+import { hashPosition } from '../../zobrist.js';
 import {
   INF,
   MATE,
@@ -35,7 +26,12 @@ import {
   type ResolvedOptions,
   type SearchOptions,
   type StopReason,
-} from './model.js';
+} from '../../search/model.js';
+import { TranspositionTable, type Bound } from '../../search/tt.js';
+import { analyzeDeferredPhysics, canNullMove } from './dpa.js';
+import { evaluateFast, evaluateMid } from './eval.js';
+import { hpSee, qsearchWorthy } from './hpSee.js';
+import { applyCandidate, applyCandidateRoot } from './make.js';
 import {
   candidates,
   orderCandidates,
@@ -43,7 +39,7 @@ import {
   type Candidate,
   type OrderingState,
 } from './ordering.js';
-import { TranspositionTable, type Bound } from './tt.js';
+import { forcedTacticalSet, shouldVerify } from './verify.js';
 
 type Context = {
   startedAt: number;
@@ -57,19 +53,13 @@ type Context = {
   tt: TranspositionTable;
   ordering: OrderingState;
   pv: GameCommand[][];
-  /** Milder extra LMR only — never changes root width or time model. */
   fastAnalysis: boolean;
-  /** Leaf eval cache for this search (huge NPS win vs re-running threat maps). */
   evalCache: Map<number, number>;
-  /** Fast (no-threat) eval cache for interior nodes. */
   fastEvalCache: Map<number, number>;
-  /** King-en-prise cache (avoids a move-gen per node). */
   checkCache: Map<number, boolean>;
-  /** Pseudo-legal move list cache (transpositions reuse movegen). */
   moveCache: Map<number, LegalMove[]>;
-  /** When true, soft deadline aborts the current ID iteration mid-tree. */
+  dpaCache: Map<number, ReturnType<typeof analyzeDeferredPhysics>>;
   softAbortIter: boolean;
-  /** Live depth ramp — ms budget per ID step (0 = full iter). */
   depthSliceMs: number;
 };
 
@@ -102,17 +92,14 @@ function createContext(options: ResolvedOptions): Context {
     stopped: false,
     stoppedBy: null,
     tt: new TranspositionTable(options.ttBits),
-    ordering: {
-      killers: [],
-      history: new Map(),
-      counterMoves: new Map(),
-    },
+    ordering: { killers: [], history: new Map(), counterMoves: new Map() },
     pv: [],
     fastAnalysis: options.fastAnalysis,
     evalCache: new Map(),
     fastEvalCache: new Map(),
     checkCache: new Map(),
     moveCache: new Map(),
+    dpaCache: new Map(),
     softAbortIter: false,
     depthSliceMs: options.depthSliceMs,
   };
@@ -124,10 +111,6 @@ function stop(context: Context, reason: StopReason): boolean {
   return true;
 }
 
-/**
- * Hard always aborts. Soft aborts the current ID iter when softAbortIter
- * (∞ live / fastAnalysis per-depth budget) so depth can climb every ~100–400ms.
- */
 function hardStop(context: Context): boolean {
   if (context.stopped) return true;
   if (context.nodes >= context.nodeLimit) return stop(context, 'nodes');
@@ -141,35 +124,37 @@ function hardStop(context: Context): boolean {
   return false;
 }
 
-function softTimeExpired(context: Context): boolean {
-  return Date.now() >= context.softDeadline;
-}
-
 function visit(context: Context, ply: number): void {
   context.nodes += 1;
   context.selDepth = Math.max(context.selDepth, ply);
 }
 
-/** Stand-pat / leaf eval — material only (captures found by qsearch). */
-function staticScore(state: MatchState, context?: Context): number {
+function cachedDpa(state: MatchState, context: Context) {
+  const key = hashPosition(state);
+  const hit = context.dpaCache.get(key);
+  if (hit) return hit;
+  const dpa = analyzeDeferredPhysics(state);
+  if (context.dpaCache.size < 200_000) context.dpaCache.set(key, dpa);
+  return dpa;
+}
+
+function leafScore(state: MatchState, context: Context, fast: boolean): number {
   const terminal = terminalScore(state);
   if (terminal !== null) return terminal;
-  if (!context) return evaluateSearchFast(state, state.activePlayer);
   const key = hashPosition(state);
-  const cached = context.evalCache.get(key);
+  const cache = fast ? context.fastEvalCache : context.evalCache;
+  const cached = cache.get(key);
   if (cached !== undefined) return cached;
-  const score = evaluateSearchFast(state, state.activePlayer);
-  if (context.evalCache.size < 400_000) context.evalCache.set(key, score);
+  // Live/fastAnalysis: Fast leaf for NPS. Full Mid when playing for accuracy.
+  const useFast = fast || context.fastAnalysis;
+  const score = useFast
+    ? evaluateFast(state, state.activePlayer)
+    : evaluateMid(state, state.activePlayer);
+  if (cache.size < 400_000) cache.set(key, score);
   return score;
 }
 
-/** Interior pruning eval — same as leaf (both are evaluateSearchFast). */
-function staticScoreFast(state: MatchState, context: Context): number {
-  return staticScore(state, context);
-}
-
 function kingEnPrise(state: MatchState, side: 'white' | 'black', context: Context): boolean {
-  // Mix side into the key; hashPosition already includes STM / pieces.
   const key = hashPosition(state) ^ (side === 'white' ? 0x13579bdf : 0x2468ace0);
   const cached = context.checkCache.get(key);
   if (cached !== undefined) return cached;
@@ -193,8 +178,8 @@ function terminalAtPly(state: MatchState, ply: number): number | null {
   return score > 0 ? score - ply : score + ply;
 }
 
-function searchChild(
-  parent: MatchState,
+function childScore(
+  parentActive: MatchState['activePlayer'],
   child: MatchState,
   depth: number,
   alpha: number,
@@ -202,38 +187,36 @@ function searchChild(
   context: Context,
   ply: number,
   previousMove: string,
-  allowNull = true,
-  childInCheck: boolean | null = null,
+  allowNull: boolean,
+  childInCheck: boolean | null,
 ): number {
-  if (child.activePlayer === parent.activePlayer) {
+  if (child.activePlayer === parentActive) {
     return pvs(child, depth, alpha, beta, context, ply, previousMove, allowNull, childInCheck);
   }
   return -pvs(child, depth, -beta, -alpha, context, ply, previousMove, allowNull, childInCheck);
 }
 
-function qsearchChild(
-  parent: MatchState,
+function childQScore(
+  parentActive: MatchState['activePlayer'],
   child: MatchState,
   alpha: number,
   beta: number,
   context: Context,
   ply: number,
   previousMove: string,
-  childInCheck: boolean | null = null,
+  childInCheck: boolean | null,
 ): number {
-  if (child.activePlayer === parent.activePlayer) {
+  if (child.activePlayer === parentActive) {
     return qsearch(child, alpha, beta, context, ply, previousMove, childInCheck);
   }
   return -qsearch(child, -beta, -alpha, context, ply, previousMove, childInCheck);
 }
 
-/** Stockfish-style LMR: log(depth) * log(moveNumber). */
 function lateMoveReduction(depth: number, moveNumber: number, fast: boolean): number {
   if (depth < 3 || moveNumber < 3) return 0;
   let r = Math.floor((Math.log(depth) * Math.log(moveNumber)) / (fast ? 1.35 : 2.1));
   if (fast && moveNumber >= 4) r += 1;
   if (fast && moveNumber >= 8) r += 1;
-  if (fast && moveNumber >= 14) r += 1;
   return Math.max(0, Math.min(depth - 1, r));
 }
 
@@ -249,32 +232,6 @@ function isKingLike(defId: string): boolean {
   return getPieceDefinition(defId).baseRole === 'king';
 }
 
-function victimDeltaGain(state: MatchState, targetPieceId: string | undefined): number {
-  if (!targetPieceId) return 400;
-  const victim = state.pieces.find((p) => p.id === targetPieceId);
-  if (!victim) return 400;
-  try {
-    const def = getPieceDefinition(victim.defId);
-    if (def.baseRole === 'king') return 900;
-    const full = ROLE_VALUE[def.baseRole] + featureModBonus(def);
-    const hpFrac = def.maxHp > 0 ? Math.min(1, 0.4 + 0.6 * (victim.hp / def.maxHp)) : 1;
-    return Math.min(900, Math.max(120, full * hpFrac));
-  } catch {
-    return 400;
-  }
-}
-
-function applyCandidate(state: MatchState, candidate: Candidate) {
-  if (candidate.move) {
-    return applyKnownMove(state, candidate.move);
-  }
-  return applyCommand(state, candidate.command);
-}
-
-/**
- * Null-move pruning (SF NMP): pass the turn, reduced-depth search.
- * Skip when in check / low material / extra-move mid-turn.
- */
 function tryNullMove(
   state: MatchState,
   depth: number,
@@ -283,12 +240,13 @@ function tryNullMove(
   context: Context,
   ply: number,
 ): number | null {
-  if (depth < 3 || evalScore < beta || state.extraMovePieceId) return null;
+  if (depth < 3 || evalScore < beta) return null;
+  const dpa = cachedDpa(state, context);
+  if (!canNullMove(state, dpa)) return null;
+
   let nonKing = 0;
   const stm = state.activePlayer;
-  const pieces = state.pieces;
-  for (let i = 0; i < pieces.length; i += 1) {
-    const p = pieces[i]!;
+  for (const p of state.pieces) {
     if (p.owner === stm && !isKingLike(p.defId)) {
       nonKing += 1;
       if (nonKing >= 2) break;
@@ -298,9 +256,14 @@ function tryNullMove(
 
   let R = 3 + Math.floor(depth / 4) + Math.min(2, Math.floor((evalScore - beta) / 200));
   if (context.fastAnalysis) R += 1;
-  const applied = applyCommand(state, { type: 'endTurn' });
-  if (!applied.ok) return null;
 
+  const applied = applyCandidate(state, {
+    command: { type: 'endTurn' },
+    key: 'endTurn',
+    move: null,
+    tactical: false,
+  });
+  if (!applied.ok) return null;
   const nullScore = -pvs(
     applied.state,
     Math.max(0, depth - 1 - R),
@@ -310,6 +273,7 @@ function tryNullMove(
     ply + 1,
     'null',
     false,
+    null,
   );
   if (nullScore >= beta) {
     return nullScore >= MATE - 10_000 ? beta : nullScore;
@@ -329,64 +293,77 @@ function qsearch(
   visit(context, ply);
   const terminal = terminalAtPly(state, ply);
   if (terminal !== null) return terminal;
-  const qLimit = context.fastAnalysis ? 8 : 12;
-  if (hardStop(context) || ply >= qLimit) return staticScore(state, context);
+  const qLimit = context.fastAnalysis ? 5 : 10;
+  if (hardStop(context) || ply >= qLimit) return leafScore(state, context, true);
 
-  const inCheck =
-    inCheckHint ?? kingEnPrise(state, state.activePlayer, context);
+  const inCheck = inCheckHint ?? kingEnPrise(state, state.activePlayer, context);
+  const dpa = cachedDpa(state, context);
   let alpha = alphaInput;
   let best = -INF;
+  let standPat = -INF;
   if (!inCheck) {
-    const standPat = staticScore(state, context);
+    standPat = leafScore(state, context, true);
     best = standPat;
     if (standPat >= beta) return standPat;
     if (standPat > alpha) alpha = standPat;
   }
 
-  const all = candidates(state, cachedLegalMoves(state, context));
-  // Avoid .filter() alloc: order only tactical when not in check.
-  let selected = all;
-  if (!inCheck) {
-    selected = [];
-    for (let i = 0; i < all.length; i += 1) {
-      if (all[i]!.tactical) selected.push(all[i]!);
+  const all = candidates(
+    state,
+    cachedLegalMoves(state, context),
+    dpa.endTurnMatters, // qsearch may pass to resolve spikes/wind
+  );
+  let selected: Candidate[] = [];
+  if (inCheck) {
+    selected = all;
+  } else {
+    for (const c of all) {
+      if (!c.move) {
+        if (c.tactical) selected.push(c);
+        continue;
+      }
+      if (c.tactical && qsearchWorthy(state, c.move, standPat, alpha)) {
+        selected.push(c);
+      }
     }
   }
   const ordered = orderCandidates(state, selected, context.ordering, ply, null, previousMove);
-  if (ordered.length === 0) return best === -INF ? staticScore(state, context) : best;
+  if (ordered.length === 0) return best === -INF ? leafScore(state, context, true) : best;
 
   for (const candidate of ordered) {
     if (hardStop(context)) break;
     if (!inCheck && candidate.move?.captures) {
-      if (best + victimDeltaGain(state, candidate.move.targetPieceId) + 80 <= alpha) {
-        continue;
-      }
+      const see = hpSee(state, candidate.move);
+      if (best + see + 80 <= alpha) continue;
     }
+
+    const parentActive = state.activePlayer;
     const applied = applyCandidate(state, candidate);
     if (!applied.ok) continue;
-    // Skip illegal evasions only near the root of qsearch (expensive check).
+    const child = applied.state;
     if (
       inCheck &&
       ply < 4 &&
-      applied.state.phase === 'play' &&
-      kingEnPrise(applied.state, state.activePlayer, context)
+      child.phase === 'play' &&
+      kingEnPrise(child, parentActive, context)
     ) {
       continue;
     }
-    const value = qsearchChild(
-      state,
-      applied.state,
+    const value = childQScore(
+      parentActive,
+      child,
       alpha,
       beta,
       context,
       ply + 1,
       candidate.key,
+      null,
     );
     if (value > best) best = value;
     if (value >= beta) return value;
     if (value > alpha) alpha = value;
   }
-  return best === -INF ? staticScore(state, context) : best;
+  return best === -INF ? leafScore(state, context, true) : best;
 }
 
 function pvs(
@@ -403,7 +380,7 @@ function pvs(
   visit(context, ply);
   const terminal = terminalAtPly(state, ply);
   if (terminal !== null) return terminal;
-  if (hardStop(context)) return staticScore(state, context);
+  if (hardStop(context)) return leafScore(state, context, true);
   if (depth <= 0) {
     return qsearch(state, alphaInput, beta, context, ply, previousMove, inCheckHint);
   }
@@ -414,48 +391,53 @@ function pvs(
   const probe = context.tt.probe(position, depth, alphaInput, beta, ply);
   if (probe.hit) return probe.score;
 
-  const inCheck =
-    inCheckHint ?? kingEnPrise(state, state.activePlayer, context);
-  // Do NOT bump depth for every in-check node — with a heavy eval that
-  // explodes the tree and leaves timed analysis stuck at depth 1–2.
-  // Stockfish can afford check extensions because NNUE is tiny; we extend
-  // only when *giving* check (below), and skip pruning while in check.
+  const inCheck = inCheckHint ?? kingEnPrise(state, state.activePlayer, context);
   const searchDepth = depth;
-
-  const evalScore = staticScoreFast(state, context);
+  const evalScore = leafScore(state, context, true);
+  const dpa = cachedDpa(state, context);
   let alpha = alphaInput;
 
-  // Forward pruning — never while in check (SF).
   if (!isPv && !inCheck) {
     const futMul = context.fastAnalysis ? 1.05 : 1.2;
     if (
       searchDepth <= (context.fastAnalysis ? 7 : 6) &&
+      !dpa.hasDeferredThreats &&
       evalScore - futilityMargin(searchDepth) * futMul >= beta &&
       Math.abs(evalScore) < MATE - 10_000
     ) {
       return evalScore;
     }
-    if (searchDepth <= (context.fastAnalysis ? 4 : 3) && evalScore + razorMargin(searchDepth) <= alpha) {
+    if (
+      searchDepth <= (context.fastAnalysis ? 4 : 3) &&
+      evalScore + razorMargin(searchDepth) <= alpha
+    ) {
       const razor = qsearch(state, alpha, beta, context, ply, previousMove);
       if (razor <= alpha) return razor;
     }
     const nullMargin = context.fastAnalysis ? 30 : 50;
-    if (allowNull && previousMove !== 'null' && searchDepth >= 2 && evalScore >= beta + nullMargin) {
+    if (
+      allowNull &&
+      previousMove !== 'null' &&
+      searchDepth >= 2 &&
+      evalScore >= beta + nullMargin
+    ) {
       const nullCut = tryNullMove(state, searchDepth, beta, evalScore, context, ply);
       if (nullCut !== null) return nullCut;
       if (context.stopped) return evalScore;
     }
   }
 
-  let moveList = candidates(state, cachedLegalMoves(state, context));
-  const ttMove = probe.moveKey;
-
+  const moveList = candidates(
+    state,
+    cachedLegalMoves(state, context),
+    false, // endTurn only via extra-move / NMP / qsearch — not every PVS node
+  );
   const ordered = orderCandidates(
     state,
     moveList,
     context.ordering,
     ply,
-    ttMove,
+    probe.moveKey,
     previousMove,
   );
   if (ordered.length === 0) return evalScore;
@@ -465,43 +447,37 @@ function pvs(
   let bestMove: string | null = null;
   let searched = 0;
   let quiets = 0;
+  let verifiedFailHigh = false;
 
   for (const candidate of ordered) {
     if (hardStop(context)) break;
+    const parentActive = state.activePlayer;
+    const sameSidePly = Boolean(state.extraMovePieceId);
     const applied = applyCandidate(state, candidate);
     if (!applied.ok) continue;
+    const child = applied.state;
 
-    // Check probe: skip in fastAnalysis except when evading check (move-gen is costly).
     let check = false;
     let childCheckKnown = false;
-    if (applied.state.phase === 'play') {
+    if (child.phase === 'play') {
       if (context.fastAnalysis) {
         if (inCheck) {
-          check = kingEnPrise(applied.state, applied.state.activePlayer, context);
+          check = kingEnPrise(child, child.activePlayer, context);
           childCheckKnown = true;
         }
       } else if (candidate.tactical || isPv) {
-        check = kingEnPrise(applied.state, applied.state.activePlayer, context);
+        check = kingEnPrise(child, child.activePlayer, context);
         childCheckKnown = true;
       }
     }
     const quiet =
-      !candidate.tactical &&
-      !check &&
-      candidate.command.type !== 'endTurn';
+      !candidate.tactical && !check && candidate.command.type !== 'endTurn';
 
-    // Late move pruning (non-PV, not in check).
-    const lmpDepth = context.fastAnalysis ? 7 : 5;
-    if (
-      !isPv &&
-      !inCheck &&
-      quiet &&
-      searchDepth <= lmpDepth &&
-      quiets >=
-        (context.fastAnalysis
-          ? Math.max(1, Math.floor((searchDepth * searchDepth) / 2.5))
-          : 2 + Math.floor((searchDepth * searchDepth + searchDepth) / 2))
-    ) {
+    const lmpDepth = context.fastAnalysis ? 8 : 5;
+    const lmpCap = context.fastAnalysis
+      ? Math.max(1, Math.floor((searchDepth * searchDepth) / 3.2))
+      : 2 + Math.floor((searchDepth * searchDepth + searchDepth) / 2);
+    if (!isPv && !inCheck && quiet && searchDepth <= lmpDepth && quiets >= lmpCap) {
       continue;
     }
 
@@ -509,40 +485,51 @@ function pvs(
       !isPv &&
       !inCheck &&
       quiet &&
+      !dpa.hasDeferredThreats &&
       searchDepth <= lmpDepth &&
       searched >= 1 &&
-      evalScore + futilityMargin(searchDepth) * (context.fastAnalysis ? 0.85 : 1) <= alpha
+      evalScore + futilityMargin(searchDepth) * (context.fastAnalysis ? 0.7 : 1) <= alpha
     ) {
       continue;
     }
 
-    // Check extension only for tactical checks.
+    if (
+      !isPv &&
+      context.fastAnalysis &&
+      candidate.move &&
+      (candidate.move.captures || candidate.move.push) &&
+      searched >= 1 &&
+      hpSee(state, candidate.move) < -40
+    ) {
+      continue;
+    }
+
     let extension = 0;
     if (check && candidate.tactical && ply < 10 && searchDepth <= 6) extension = 1;
     const fullDepth = searchDepth - 1 + extension;
 
-    // LMR: never reduce checks, captures, PV first moves, or check evasions.
     let reduction = 0;
     if (
-      searched >= 2 &&
+      searched >= (context.fastAnalysis ? 1 : 2) &&
       searchDepth >= 3 &&
       !inCheck &&
       quiet &&
       !check &&
-      applied.state.activePlayer !== state.activePlayer
+      !sameSidePly &&
+      child.activePlayer !== parentActive
     ) {
       reduction = lateMoveReduction(searchDepth, searched + 1, context.fastAnalysis);
-      if (!isPv) reduction += 1;
+      if (!isPv) reduction += context.fastAnalysis ? 2 : 1;
       if (isPv) reduction = Math.max(0, reduction - 1);
       reduction = Math.min(reduction, Math.max(0, fullDepth - 1));
     }
 
-    let value: number;
     const childHint = childCheckKnown ? check : null;
+    let value: number;
     if (searched === 0) {
-      value = searchChild(
-        state,
-        applied.state,
+      value = childScore(
+        parentActive,
+        child,
         fullDepth,
         alpha,
         beta,
@@ -553,9 +540,9 @@ function pvs(
         childHint,
       );
     } else {
-      value = searchChild(
-        state,
-        applied.state,
+      value = childScore(
+        parentActive,
+        child,
         Math.max(0, fullDepth - reduction),
         alpha,
         alpha + 1,
@@ -566,9 +553,9 @@ function pvs(
         childHint,
       );
       if (reduction > 0 && value > alpha && !context.stopped) {
-        value = searchChild(
-          state,
-          applied.state,
+        value = childScore(
+          parentActive,
+          child,
           fullDepth,
           alpha,
           alpha + 1,
@@ -580,9 +567,9 @@ function pvs(
         );
       }
       if (value > alpha && value < beta && !context.stopped) {
-        value = searchChild(
-          state,
-          applied.state,
+        value = childScore(
+          parentActive,
+          child,
           fullDepth,
           alpha,
           beta,
@@ -594,8 +581,14 @@ function pvs(
         );
       }
     }
+
     searched += 1;
-    if (quiet) quiets += 1;
+    if (
+      !candidate.tactical &&
+      candidate.command.type !== 'endTurn'
+    ) {
+      quiets += 1;
+    }
 
     if (value > best) {
       best = value;
@@ -606,6 +599,42 @@ function pvs(
     }
     if (value > alpha) alpha = value;
     if (alpha >= beta) {
+      // Tactical verification on suspicious fail-high
+      if (
+        shouldVerify(isPv, searchDepth, value, beta, verifiedFailHigh) &&
+        !context.fastAnalysis &&
+        !context.stopped
+      ) {
+        verifiedFailHigh = true;
+        const forced = forcedTacticalSet(state, ordered, 6);
+        let verifyBest = value;
+        for (const fc of forced) {
+          if (fc.key === candidate.key) continue;
+          const pa = state.activePlayer;
+          const fa = applyCandidate(state, fc);
+          if (!fa.ok) continue;
+          const vs = childScore(
+            pa,
+            fa.state,
+            Math.min(3, searchDepth - 1),
+            beta - 1,
+            beta,
+            context,
+            ply + 1,
+            fc.key,
+            false,
+            null,
+          );
+          if (vs > verifyBest) verifyBest = vs;
+        }
+        if (verifyBest < beta) {
+          // False fail-high — continue searching
+          alpha = Math.max(originalAlpha, verifyBest);
+          best = verifyBest;
+          continue;
+        }
+        best = verifyBest;
+      }
       recordCutoff(context.ordering, candidate, ply, searchDepth, previousMove);
       break;
     }
@@ -630,7 +659,6 @@ function rootSearch(
   skill: number,
   previousBest: string | null,
 ): Iteration {
-  // Always search the full ordered root — Stockfish never drops to 2–3 moves.
   const ordered = orderCandidates(state, root, context.ordering, 0, previousBest, null);
   let alpha = alphaInput;
   let searchScore = -INF;
@@ -643,7 +671,7 @@ function rootSearch(
 
   for (const candidate of ordered) {
     if (hardStop(context)) break;
-    const applied = applyCandidate(state, candidate);
+    const applied = applyCandidateRoot(state, candidate);
     if (!applied.ok) continue;
     legalTried += 1;
     context.pv[1] = [];
@@ -652,16 +680,15 @@ function rootSearch(
       applied.state.phase === 'play' &&
       kingEnPrise(applied.state, applied.state.activePlayer, context);
 
-    let value: number;
-    // Root LMR only for late quiet non-checking moves.
     const reduction =
       searched >= 3 && depth >= 4 && !candidate.tactical && !check
         ? Math.min(2, lateMoveReduction(depth, searched + 1, context.fastAnalysis))
         : 0;
 
+    let value: number;
     if (searched === 0) {
-      value = searchChild(
-        state,
+      value = childScore(
+        state.activePlayer,
         applied.state,
         depth - 1,
         alpha,
@@ -673,8 +700,8 @@ function rootSearch(
         check,
       );
     } else {
-      value = searchChild(
-        state,
+      value = childScore(
+        state.activePlayer,
         applied.state,
         Math.max(0, depth - 1 - reduction),
         alpha,
@@ -686,8 +713,8 @@ function rootSearch(
         check,
       );
       if (reduction > 0 && value > alpha && !context.stopped) {
-        value = searchChild(
-          state,
+        value = childScore(
+          state.activePlayer,
           applied.state,
           depth - 1,
           alpha,
@@ -700,8 +727,8 @@ function rootSearch(
         );
       }
       if (value > alpha && value < beta && !context.stopped) {
-        value = searchChild(
-          state,
+        value = childScore(
+          state.activePlayer,
           applied.state,
           depth - 1,
           alpha,
@@ -715,106 +742,128 @@ function rootSearch(
       }
     }
     searched += 1;
-    if (value > searchScore) searchScore = value;
-    if (value > alpha) alpha = value;
+    if (context.stopped && searched > 1) break;
 
     const adjusted = value + rootNoise(candidate.command, skill, depth);
+    if (value > searchScore) searchScore = value;
     if (adjusted > selectedAdjusted) {
       selectedAdjusted = adjusted;
       selectedScore = value;
       best = candidate;
       bestPv = [candidate.command, ...(context.pv[1] ?? [])];
     }
-    if (alpha >= beta) break;
-  }
-
-  return {
-    best,
-    score: selectedScore === -INF ? staticScore(state, context) : selectedScore,
-    searchScore: searchScore === -INF ? staticScore(state, context) : searchScore,
-    pv: bestPv,
-    // Complete if we searched ≥1 move; soft-aborted fastAnalysis iters still count.
-    completed:
-      legalTried > 0 &&
-      (!context.stopped ||
-        (context.depthSliceMs > 0 && context.stoppedBy === 'softTime')),
-  };
-}
-
-function staticBatch(state: MatchState, options: ResolvedOptions): InternalResult {
-  const context = createContext(options);
-  const root = candidates(state, cachedLegalMoves(state, context));
-  if (root.length === 0) {
-    const score = staticScore(state, context);
-    return {
-      best: { type: 'endTurn' },
-      score,
-      pv: [],
-      depth: 0,
-      context,
-      stoppedBy: 'terminal',
-    };
-  }
-  let best = root[0]!;
-  let bestScore = -INF;
-  let bestTrueScore = -INF;
-  for (const candidate of root) {
-    const result = applyCandidate(state, candidate);
-    if (!result.ok) continue;
-    const value = evaluateSearch(result.state, state.activePlayer);
-    const adjusted = value + rootNoise(candidate.command, options.skill, 1);
-    if (adjusted > bestScore) {
-      bestScore = adjusted;
-      bestTrueScore = value;
-      best = candidate;
+    if (value > alpha) alpha = value;
+    if (alpha >= beta) {
+      recordCutoff(context.ordering, candidate, 0, depth, null);
+      break;
     }
   }
+
+  // Soft-aborted depth slices still count as completed (Stockfish live contract).
+  const completed =
+    legalTried > 0 &&
+    (!context.stopped ||
+      (context.depthSliceMs > 0 && context.stoppedBy === 'softTime'));
+  if (legalTried === 0) {
+    return {
+      best: {
+        command: { type: 'endTurn' },
+        key: 'endTurn',
+        move: null,
+        tactical: false,
+      },
+      score: leafScore(state, context, false),
+      searchScore: leafScore(state, context, false),
+      pv: [{ type: 'endTurn' }],
+      completed: true,
+    };
+  }
   return {
-    best: best.command,
-    score: bestTrueScore,
-    pv: [best.command],
-    depth: 1,
-    context,
-    stoppedBy: 'depth',
+    best,
+    score: selectedScore,
+    searchScore,
+    pv: bestPv,
+    completed,
   };
 }
 
-/**
- * Iterative deepening — soft time only BETWEEN completed iterations.
- * Reported depth = last fully completed ID iteration (never inflated).
- * ∞ climbs as each depth finishes; timed stops when the soft budget is gone.
- */
 function iterative(
   state: MatchState,
   optionsInput: SearchOptions,
   onIteration?: (partial: FullSearchResult) => void,
 ): InternalResult {
-  const options = resolveOptions(optionsInput, (optionsInput.skill ?? 10) >= 10);
-  if (options.batch) return staticBatch(state, options);
+  const options = resolveOptions(optionsInput);
   const context = createContext(options);
-  const root = candidates(state, cachedLegalMoves(state, context));
-  if (root.length === 0) {
-    const score = staticScore(state, context);
+  const rootMoves = candidates(state, getLegalMoves(state), Boolean(state.extraMovePieceId));
+
+  if (rootMoves.length === 0) {
     return {
       best: { type: 'endTurn' },
-      score,
-      pv: [],
+      score: leafScore(state, context, false),
+      pv: [{ type: 'endTurn' }],
       depth: 0,
       context,
-      stoppedBy: terminalScore(state) !== null ? 'terminal' : 'depth',
+      stoppedBy: 'terminal',
     };
   }
 
-  let accepted: Iteration | null = null;
+  if (options.skill <= 0) {
+    const idx =
+      (((state.turn * 2654435761) ^ (rootMoves.length * 97)) >>> 0) % rootMoves.length;
+    const pick = rootMoves[idx]!;
+    return {
+      best: pick.command,
+      score: 0,
+      pv: [pick.command],
+      depth: 0,
+      context,
+      stoppedBy: 'depth',
+    };
+  }
+
+  if (options.batch) {
+    let best = rootMoves[0]!;
+    let bestScore = -INF;
+    for (const c of rootMoves) {
+      const applied = applyCandidateRoot(state, c);
+      if (!applied.ok) continue;
+      const score = parentScore(
+        state.activePlayer,
+        applied.state,
+        evaluateMid(applied.state, applied.state.activePlayer),
+      );
+      const adj = score + rootNoise(c.command, options.skill, 1);
+      if (adj > bestScore) {
+        bestScore = adj;
+        best = c;
+      }
+    }
+    return {
+      best: best.command,
+      score: bestScore,
+      pv: [best.command],
+      depth: 1,
+      context,
+      stoppedBy: 'depth',
+    };
+  }
+
+  let best = rootMoves[0]!;
+  let bestScore = -INF;
+  let bestPv: GameCommand[] = [best.command];
   let completedDepth = 0;
+  let previousBest: string | null = null;
+  let accepted: Iteration | null = null;
+
   const unlimited = options.softTimeMs >= Number.MAX_SAFE_INTEGER / 4;
   const overallSoft = context.softDeadline;
-  const startDepth = Math.min(options.maxDepth, options.startDepth);
+  const startDepth = Math.min(options.maxDepth, Math.max(1, options.startDepth));
   const depthSliceMs = options.depthSliceMs;
 
   for (let depth = startDepth; depth <= options.maxDepth; depth += 1) {
     context.tt.nextGeneration();
 
+    // Overall clock only — never the previous depth-slice deadline.
     if (depth > startDepth && Date.now() >= overallSoft) {
       context.stoppedBy ??= 'softTime';
       break;
@@ -829,73 +878,70 @@ function iterative(
       context.softAbortIter = false;
     }
 
+    // Soft-abort of prior slice must not kill the climb.
     if (context.stopped && context.stoppedBy === 'softTime') {
       context.stopped = false;
       context.stoppedBy = null;
     }
 
-    const aspWindow = depthSliceMs > 0 ? 32 : 28;
-    let delta = depth >= 4 && accepted ? aspWindow : INF;
-    let alpha = accepted && delta < INF ? Math.max(-INF, accepted.searchScore - delta) : -INF;
-    let beta = accepted && delta < INF ? Math.min(INF, accepted.searchScore + delta) : INF;
-    let current: Iteration | null = null;
-    let failedHigh = 0;
-    let aspTries = 0;
-
-    for (;;) {
-      aspTries += 1;
-      if (aspTries > 5) break;
-
-      current = rootSearch(
-        state,
-        root,
-        Math.max(1, depth - failedHigh),
-        alpha,
-        beta,
-        context,
-        options.skill,
-        accepted?.best.key ?? null,
-      );
-
+    let alpha = -INF;
+    let beta = INF;
+    let window = depthSliceMs > 0 ? 32 : 28;
+    let iter: Iteration | null = null;
+    for (let aspir = 0; aspir < 5; aspir += 1) {
+      if (depth >= 4 && accepted) {
+        alpha = Math.max(-INF, accepted.searchScore - window);
+        beta = Math.min(INF, accepted.searchScore + window);
+      }
+      iter = rootSearch(state, rootMoves, depth, alpha, beta, context, options.skill, previousBest);
       if (context.stopped) break;
-      if (delta >= INF) break;
-
-      if (current.searchScore <= alpha) {
-        beta = Math.floor((alpha + beta) / 2);
-        alpha = Math.max(-INF, current.searchScore - delta);
-        delta = Math.min(INF, delta + Math.floor(delta / 3) + 8);
-        failedHigh = 0;
+      if (window >= INF / 4) break;
+      if (iter.searchScore <= alpha) {
+        window = Math.min(INF, window * 2);
+        alpha = -INF;
         continue;
       }
-      if (current.searchScore >= beta) {
-        beta = Math.min(INF, current.searchScore + delta);
-        delta = Math.min(INF, delta + Math.floor(delta / 3) + 8);
-        failedHigh += 1;
+      if (iter.searchScore >= beta) {
+        window = Math.min(INF, window * 2);
+        beta = INF;
         continue;
       }
       break;
     }
 
-    if (!current) break;
+    if (!iter) break;
 
-    if (current.completed) {
-      accepted = current;
+    if (iter.completed) {
+      accepted = iter;
       completedDepth = depth;
+      best = iter.best;
+      bestScore = iter.score;
+      bestPv = iter.pv;
+      previousBest = iter.best.key;
     } else if (!accepted) {
-      accepted = current;
-    } else if (unlimited) {
-      if (current.searchScore > accepted.searchScore) accepted = current;
-    } else if (current.searchScore > accepted.searchScore) {
-      accepted = current;
+      accepted = iter;
+      best = iter.best;
+      bestScore = iter.score;
+      bestPv = iter.pv;
+      previousBest = iter.best.key;
+      if (depth === startDepth) completedDepth = depth;
+    } else if (unlimited || iter.searchScore > accepted.searchScore) {
+      if (iter.searchScore > accepted.searchScore) {
+        accepted = iter;
+        best = iter.best;
+        bestScore = iter.score;
+        bestPv = iter.pv;
+        previousBest = iter.best.key;
+      }
     }
 
     if (accepted && onIteration) {
       const elapsedMs = Math.max(0, Date.now() - context.startedAt);
       onIteration({
-        best: accepted.best.command,
-        score: accepted.score,
-        scoreWhite: scoreWhite(state, accepted.score),
-        pv: accepted.pv,
+        best: best.command,
+        score: bestScore,
+        scoreWhite: scoreWhite(state, bestScore),
+        pv: bestPv,
         depth: completedDepth,
         selDepth: context.selDepth,
         nodes: context.nodes,
@@ -905,24 +951,11 @@ function iterative(
       });
     }
 
-    if (Math.abs(current.searchScore) >= MATE - 256) break;
+    if (Math.abs(iter.searchScore) >= MATE - 256) break;
     if (context.stoppedBy === 'nodes' || context.stoppedBy === 'hardTime') break;
 
-    // Timed non-fast: stop on incomplete deeper iter. Fast live keeps climbing.
-    if (!current.completed && depth > startDepth && options.depthSliceMs === 0) break;
-  }
-
-  const result = accepted;
-  if (!result) {
-    const q = qsearch(state, -INF, INF, context, 0, null);
-    return {
-      best: root[0]?.command ?? { type: 'endTurn' },
-      score: q,
-      pv: root[0] ? [root[0].command] : [],
-      depth: 0,
-      context,
-      stoppedBy: context.stoppedBy ?? 'softTime',
-    };
+    // Timed searches stop on incomplete deeper iter; live depth-slice keeps climbing.
+    if (!iter.completed && depth > startDepth && depthSliceMs === 0) break;
   }
 
   const stoppedBy =
@@ -934,36 +967,42 @@ function iterative(
         : 'depth');
 
   return {
-    best: result.best.command,
-    score: result.score,
-    pv: result.pv,
+    best: best.command,
+    score: bestScore,
+    pv: bestPv,
     depth: completedDepth,
     context,
     stoppedBy,
   };
 }
 
-export function chooseStockfish(state: MatchState, options: SearchOptions): GameCommand {
+export function chooseForgefish(state: MatchState, options: SearchOptions): GameCommand {
   if (canUseClassicFastPath(state)) return searchClassic(state, options).best;
   return iterative(state, options).best;
 }
 
-export async function chooseStockfishAsync(
+export async function chooseForgefishAsync(
   state: MatchState,
   options: SearchOptions,
 ): Promise<GameCommand> {
-  const result = canUseClassicFastPath(state)
-    ? searchClassic(state, options)
-    : iterative(state, options);
+  if (canUseClassicFastPath(state)) {
+    const result = searchClassic(state, options);
+    await Promise.resolve();
+    return result.best;
+  }
+  const result = iterative(state, options);
   await Promise.resolve();
   return result.best;
 }
 
-export function searchStockfish(
+export function searchForgefish(
   state: MatchState,
   options: SearchOptions,
   onIteration?: (partial: FullSearchResult) => void,
 ): FullSearchResult {
+  if (canUseClassicFastPath(state)) {
+    return searchClassic(state, options, onIteration);
+  }
   const terminal = terminalScore(state);
   if (terminal !== null) {
     return {
@@ -979,9 +1018,7 @@ export function searchStockfish(
       stoppedBy: 'terminal',
     };
   }
-  if (canUseClassicFastPath(state)) {
-    return searchClassic(state, options, onIteration);
-  }
+
   const result = iterative(state, options, onIteration);
   const elapsedMs = Math.max(0, Date.now() - result.context.startedAt);
   return {
@@ -998,7 +1035,7 @@ export function searchStockfish(
   };
 }
 
-export function scoreMovesStockfish(
+export function scoreMovesForgefish(
   state: MatchState,
   moves: LegalMove[],
   depth: number,
@@ -1009,27 +1046,29 @@ export function scoreMovesStockfish(
   const results: Array<{ move: LegalMove; score: number }> = [];
   for (const move of moves) {
     if (hardStop(context)) break;
-    const candidate = candidates(state, [move])[0]!;
-    const applied = applyCandidate(state, candidate);
+    const list = candidates(state, [move], false);
+    const c = list[0]!;
+    const applied = applyCandidateRoot(state, c);
     if (!applied.ok) continue;
-    const child = pvs(
-      applied.state,
+    const child = applied.state;
+    const score = childScore(
+      state.activePlayer,
+      child,
       Math.max(0, depth - 1),
       -INF,
       INF,
       context,
       1,
-      candidate.key,
+      c.key,
+      true,
+      null,
     );
-    results.push({
-      move,
-      score: parentScore(state.activePlayer, applied.state, child),
-    });
+    results.push({ move, score });
   }
   return { results, completed: !context.stopped && results.length === moves.length };
 }
 
-export function scoreCommandStockfish(
+export function scoreCommandForgefish(
   state: MatchState,
   command: GameCommand,
   depth: number,
@@ -1037,23 +1076,47 @@ export function scoreCommandStockfish(
 ): { score: number; completed: boolean } {
   const options = resolveOptions(optionsInput, true);
   const context = createContext(options);
-  const applied = applyCommand(state, command);
-  if (!applied.ok) return { score: -INF, completed: true };
-  const key =
+  const candidate: Candidate =
     command.type === 'endTurn'
-      ? 'endTurn'
-      : `${command.from.x},${command.from.y}->${command.to.x},${command.to.y}`;
-  const child = pvs(
+      ? { command, key: 'endTurn', move: null, tactical: false }
+      : {
+          command,
+          key: `${command.from.x},${command.from.y}->${command.to.x},${command.to.y}:${command.abilityId ?? ''}:0:${command.push ? 1 : 0}`,
+          move: null,
+          tactical: Boolean(command.abilityId || command.push),
+        };
+
+  // Prefer matching a legal move for make path
+  if (command.type === 'move') {
+    const legal = getLegalMoves(state).find(
+      (m) =>
+        m.from.x === command.from.x &&
+        m.from.y === command.from.y &&
+        m.to.x === command.to.x &&
+        m.to.y === command.to.y &&
+        (m.abilityId ?? '') === (command.abilityId ?? '') &&
+        Boolean(m.push) === Boolean(command.push),
+    );
+    if (legal) {
+      candidate.move = legal;
+      candidate.tactical = Boolean(legal.captures || legal.abilityId || legal.push);
+      candidate.key = `${legal.from.x},${legal.from.y}->${legal.to.x},${legal.to.y}:${legal.abilityId ?? ''}:${legal.captures ? 1 : 0}:${legal.push ? 1 : 0}`;
+    }
+  }
+
+  const applied = applyCandidateRoot(state, candidate);
+  if (!applied.ok) return { score: -INF, completed: true };
+  const score = childScore(
+    state.activePlayer,
     applied.state,
     Math.max(0, depth - 1),
     -INF,
     INF,
     context,
     1,
-    key,
+    candidate.key,
+    true,
+    null,
   );
-  return {
-    score: parentScore(state.activePlayer, applied.state, child),
-    completed: !context.stopped,
-  };
+  return { score, completed: !context.stopped };
 }

@@ -47,6 +47,18 @@ function pieceName(state: MatchState, pieceId: string): string {
   return defName(p.defId);
 }
 
+function pieceNameAt(state: MatchState, pieceId: string): string {
+  const p = state.pieces.find((x) => x.id === pieceId);
+  if (!p) return pieceName(state, pieceId);
+  return `${pieceName(state, pieceId)} ${sq(p.pos)}`;
+}
+
+function healHistoryText(state: MatchState, e: Extract<GameEvent, { type: 'Healed' }>): string {
+  const target = pieceName(state, e.pieceId);
+  const source = pieceNameAt(state, e.byPieceId);
+  return `+1 HP → ${target} (${e.hp} HP) · ${source}`;
+}
+
 function ownerOf(
   state: MatchState,
   pieceId: string,
@@ -83,6 +95,10 @@ function abilitySuffix(abilityId: string | undefined): string {
       return ' (шипы)';
     case 'judgeBless':
       return ' (приговор)';
+    case 'heartEat':
+      return ' (сердцеедка)';
+    case 'throwSpear':
+      return ' (копье)';
     case 'frontBless':
       return ' (клерик)';
     default:
@@ -383,15 +399,24 @@ export function formatEventsToHistory(
         `Таран: ${pieceName(stateAfter, e.pieceId)} ${sq(e.from)}→${sq(e.to)}`,
       );
     } else if (e.type === 'Healed') {
-      const text = `лечение ${pieceName(stateAfter, e.pieceId)} (${e.hp} HP)`;
+      const text = healHistoryText(stateAfter, e);
       if (mainText === null) {
-        setMain(
-          ownerOf(stateAfter, e.byPieceId, expectedPlayer),
-          `Лечение ${pieceName(stateAfter, e.pieceId)} (${e.hp} HP)`,
-        );
+        setMain(ownerOf(stateAfter, e.byPieceId, expectedPlayer), text);
       } else {
         addNote(text);
       }
+    } else if (e.type === 'BonusHpStripped') {
+      const text = `снятие HP → ${pieceName(stateAfter, e.pieceId)} (${e.hp} HP) · ${pieceNameAt(stateAfter, e.byPieceId)}`;
+      setMain(ownerOf(stateAfter, e.byPieceId, expectedPlayer), text);
+    } else if (e.type === 'SpearThrown') {
+      const targetName = pieceName(stateAfter, e.targetPieceId);
+      const killer = pieceNameAt(stateAfter, e.byPieceId);
+      const outcome =
+        e.hpLeft !== undefined ? ` (${e.hpLeft} HP)` : ` × ${targetName}`;
+      setMain(
+        ownerOf(stateAfter, e.byPieceId, expectedPlayer),
+        `Копье ${killer} → ${targetName} ${sq(e.at)}${outcome}`,
+      );
     } else if (e.type === 'ShieldGranted') {
       setMain(
         ownerOf(stateAfter, e.byPieceId, expectedPlayer),
@@ -430,7 +455,7 @@ export function formatEventsToHistory(
     } else if (e.type === 'Reflected') {
       addNote(`отражение (${e.damage})`);
     } else if (e.type === 'TileTriggered') {
-      if (e.note === 'heal') addNote(`гриб +1 HP`);
+      if (e.note === 'heal') addNote(`гриб ${sq(e.at)} +1 HP`);
       else if (e.note === 'shield') addNote(`щит леса`);
       else if (e.note === 'armed') addNote(`шипы`);
       else if (e.note.startsWith('push:')) addNote(`ветер`);

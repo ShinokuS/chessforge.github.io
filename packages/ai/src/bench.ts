@@ -14,7 +14,7 @@ export type BenchCase = {
 
 export type BenchRow = {
   name: string;
-  engine: 'stockfish' | 'legacy';
+  engine: string;
   command: SearchResult['best'];
   score: number;
   depth: number;
@@ -64,11 +64,11 @@ function tacticalCases(): BenchCase[] {
 }
 
 export function runAiBench(
-  options: ChooseOptions & { compareLegacy?: boolean } = {},
+  options: ChooseOptions & { compareLegacy?: boolean; compareForgefish?: boolean } = {},
 ): BenchRow[] {
-  const engines: Array<'stockfish' | 'legacy'> = options.compareLegacy
-    ? ['stockfish', 'legacy']
-    : ['stockfish'];
+  const engines: string[] = ['stockfish'];
+  if (options.compareForgefish) engines.push('forgefish');
+  if (options.compareLegacy) engines.push('legacy');
   const rows: BenchRow[] = [];
   for (const fixture of tacticalCases()) {
     for (const engine of engines) {

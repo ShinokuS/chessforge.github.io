@@ -9,7 +9,9 @@ import {
   type Coord,
 } from '@chessforge/engine';
 import { useAppStore } from '../app/store';
+import { lastMoveAtReplayIndex } from './replay';
 import { PieceIcon } from './PieceIcon';
+import { PieceStatusMarks } from './PieceStatusMarks';
 import {
   ABILITY_LABEL,
   actionLabel,
@@ -44,19 +46,36 @@ export function BoardView() {
   const battleMode = useAppStore((s) => s.battleMode);
   const canControl = useAppStore((s) => s.canControl);
   const endBanner = useAppStore((s) => s.endBanner);
+  const liveReviewCursor = useAppStore((s) => s.liveReviewCursor);
+  const liveReviewPositions = useAppStore((s) => s.liveReviewPositions);
   const [hovered, setHovered] = useState<Coord | null>(null);
 
-  const reviewing = analysis.status === 'done' || analysis.status === 'running';
-  const state =
-    reviewing && analysis.positions[analysis.cursor]
-      ? analysis.positions[analysis.cursor]!
+  const reviewingAnalysis = analysis.status === 'done' || analysis.status === 'running';
+  const reviewingLive =
+    !reviewingAnalysis &&
+    liveReviewCursor !== 'live' &&
+    liveReviewPositions.length > 1;
+  const reviewing = reviewingAnalysis || reviewingLive;
+  const state = reviewingAnalysis && analysis.positions[analysis.cursor]
+    ? analysis.positions[analysis.cursor]!
+    : reviewingLive
+      ? liveReviewPositions[liveReviewCursor]!
       : liveState;
 
   const lastMoveRaw = (() => {
-    if (!reviewing || analysis.cursor <= 0) return reviewing ? null : liveLastMove;
-    const ply = analysis.plies[analysis.cursor - 1];
-    if (!ply || ply.played.type !== 'move') return null;
-    return { from: ply.played.from, to: ply.played.to };
+    if (reviewingAnalysis) {
+      if (analysis.cursor <= 0) return null;
+      const ply = analysis.plies[analysis.cursor - 1];
+      if (!ply || ply.played.type !== 'move') return null;
+      return { from: ply.played.from, to: ply.played.to };
+    }
+    if (reviewingLive) {
+      const replay =
+        battleMode === 'online' ? online.getReplay() : session.getReplay();
+      if (!replay) return null;
+      return lastMoveAtReplayIndex(replay.commands, liveReviewCursor);
+    }
+    return liveLastMove;
   })();
 
   const activeSession = battleMode === 'online' ? online : session;
@@ -227,7 +246,10 @@ export function BoardView() {
           aria-label={`${tileDef.name}, клетка ${x},${y}`}
         >
           {piece && !hiddenFromMe && (
-            <PieceIcon defId={piece.defId} owner={piece.owner} className={styles.piece} />
+            <>
+              <PieceIcon defId={piece.defId} owner={piece.owner} className={styles.piece} />
+              <PieceStatusMarks piece={piece} />
+            </>
           )}
           {tileId !== 'plain' && (
             <span className={styles.tileMark}>{TILE_MARK[tileId] ?? '·'}</span>

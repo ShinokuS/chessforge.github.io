@@ -353,6 +353,79 @@
   filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.35));
 }
 
+.pieceMarks {
+  position: absolute;
+  top: 1px;
+  right: 2px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  max-width: 55%;
+  pointer-events: none;
+  line-height: 1;
+}
+
+.pieceMarksHp,
+.pieceMarksStatus {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0 1px;
+}
+
+.pieceMarksHp,
+.pieceMarksStatus span {
+  font-size: clamp(0.55rem, 1.55vmin, 0.78rem);
+  line-height: 1;
+  text-shadow:
+    0 0 2px color-mix(in srgb, var(--light-sq) 80%, #fff),
+    0 1px 0 color-mix(in srgb, var(--light-sq) 70%, transparent);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.35));
+}
+
+.markHeart {
+  color: #c62828;
+}
+
+.markRoyal {
+  color: #c9a227;
+}
+
+.markFreeze {
+  color: #3d7ea6;
+}
+
+.markShield {
+  color: #2e7d4f;
+}
+
+.markSpike {
+  color: #b33a2b;
+}
+
+.markWind {
+  color: #4a6fa5;
+}
+
+.markCloak {
+  color: #5a6a8a;
+  opacity: 0.9;
+}
+
+.markCurse {
+  color: #8e3dff;
+}
+
+.markReflect {
+  color: #c47a1a;
+}
+
+.markDouble {
+  color: #d4a017;
+}
+
 .inspect {
   grid-area: inspect;
   padding: 0.75rem 0.9rem;

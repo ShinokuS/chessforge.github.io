@@ -1,4 +1,4 @@
-import type { ChooseOptions } from '@chessforge/ai';
+import { DEFAULT_BOT_ID, type BotId, type ChooseOptions } from '@chessforge/ai';
 import {
   applyCommand,
   getPieceDefinition,
@@ -42,15 +42,20 @@ export type AnalysisProgress = {
 /**
  * Analysis uses real search in workers (not static eval).
  */
-export const ANALYSIS_OPTIONS: ChooseOptions = {
-  maxDepth: 8,
-  timeMs: 350,
-  nodeLimit: 400_000,
-  skill: 10,
-  ttBits: 18,
-  workers: 4,
-  engine: 'stockfish',
-};
+export function analysisOptions(botId: BotId = DEFAULT_BOT_ID): ChooseOptions {
+  return {
+    maxDepth: 8,
+    timeMs: 350,
+    nodeLimit: 400_000,
+    skill: 10,
+    ttBits: 18,
+    workers: 4,
+    engine: botId,
+  };
+}
+
+/** @deprecated Prefer analysisOptions(botId). */
+export const ANALYSIS_OPTIONS: ChooseOptions = analysisOptions(DEFAULT_BOT_ID);
 
 export function judgmentLabel(j: MoveJudgment): string {
   return judgmentLabelShared(j);
@@ -84,7 +89,11 @@ export function formatMoveCommand(state: MatchState, cmd: GameCommand): string {
                   ? ' (щит)'
                   : cmd.abilityId === 'designatePromote'
                     ? ' (назначение)'
-                    : '';
+                    : cmd.abilityId === 'heartEat'
+                      ? ' (сердцеедка)'
+                      : cmd.abilityId === 'throwSpear'
+                        ? ' (копье)'
+                        : '';
   return `${name} ${sq(cmd.from.x, cmd.from.y)}→${sq(cmd.to.x, cmd.to.y)}${ability}`;
 }
 

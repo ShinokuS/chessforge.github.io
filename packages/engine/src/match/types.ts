@@ -17,7 +17,9 @@ export type AbilityId =
   | 'spikeTile'
   | 'cloakPawn'
   | 'judgeBless'
-  | 'doubleMove';
+  | 'doubleMove'
+  | 'heartEat'
+  | 'throwSpear';
 
 export type TileDefinition = {
   id: TileId;

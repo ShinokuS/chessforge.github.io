@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { clampBotId, DEFAULT_BOT_ID, type BotId } from '@chessforge/ai';
 import type { AbilityId, Coord, GameEvent, MatchState, PlayerId } from '@chessforge/engine';
 import { GameSession } from '../adapters/GameSession';
 import { OnlineGameSession } from '../adapters/OnlineGameSession';
@@ -8,6 +9,7 @@ import {
   appendHistoryFromEvents,
   type MoveHistoryEntry,
 } from '../battle/moveHistory';
+import { buildReplayPositions } from '../battle/replay';
 import {
   advanceClocks,
   freshClocks,
@@ -25,6 +27,7 @@ import {
   clampAnalysisDepth,
   clampAnalysisThreads,
   clampAnalysisTimeMs,
+  DEFAULT_ANALYSIS_BOT_ID,
   DEFAULT_ANALYSIS_DEPTH,
   DEFAULT_ANALYSIS_TIME_MS,
   defaultAnalysisThreads,
@@ -40,7 +43,8 @@ export type AppView = 'battle' | 'analysis' | 'collection' | 'deck' | 'library';
 export type BattleMode = 'ai' | 'online';
 
 const STRENGTH_STORAGE_KEY = 'chessforge.engine-strength.v1';
-const ANALYSIS_ENGINE_STORAGE_KEY = 'chessforge.analysis-engine.v5';
+const AI_BOT_STORAGE_KEY = 'chessforge.ai-bot.v1';
+const ANALYSIS_ENGINE_STORAGE_KEY = 'chessforge.analysis-engine.v6';
 
 function readStoredAiStrength(): AiStrengthLevel {
   try {
@@ -61,10 +65,30 @@ function writeStoredAiStrength(ai: AiStrengthLevel): void {
   }
 }
 
+function readStoredAiBotId(): BotId {
+  try {
+    const raw = localStorage.getItem(AI_BOT_STORAGE_KEY);
+    if (!raw) return DEFAULT_BOT_ID;
+    const parsed = JSON.parse(raw) as { botId?: string };
+    return clampBotId(parsed.botId);
+  } catch {
+    return DEFAULT_BOT_ID;
+  }
+}
+
+function writeStoredAiBotId(botId: BotId): void {
+  try {
+    localStorage.setItem(AI_BOT_STORAGE_KEY, JSON.stringify({ botId }));
+  } catch {
+    /* ignore */
+  }
+}
+
 type StoredAnalysisEngine = {
   timeMs: AnalysisTimeMs;
   depth: AnalysisDepth;
   threads: AnalysisThreads;
+  botId: BotId;
 };
 
 function readStoredAnalysisEngine(): StoredAnalysisEngine {
@@ -75,23 +99,27 @@ function readStoredAnalysisEngine(): StoredAnalysisEngine {
         timeMs: DEFAULT_ANALYSIS_TIME_MS,
         depth: DEFAULT_ANALYSIS_DEPTH,
         threads: defaultAnalysisThreads(),
+        botId: DEFAULT_ANALYSIS_BOT_ID,
       };
     }
     const parsed = JSON.parse(raw) as {
       timeMs?: number;
       depth?: number;
       threads?: number;
+      botId?: string;
     };
     return {
       timeMs: clampAnalysisTimeMs(parsed.timeMs ?? DEFAULT_ANALYSIS_TIME_MS),
       depth: clampAnalysisDepth(parsed.depth ?? DEFAULT_ANALYSIS_DEPTH),
       threads: clampAnalysisThreads(parsed.threads ?? defaultAnalysisThreads()),
+      botId: clampBotId(parsed.botId ?? DEFAULT_ANALYSIS_BOT_ID),
     };
   } catch {
     return {
       timeMs: DEFAULT_ANALYSIS_TIME_MS,
       depth: DEFAULT_ANALYSIS_DEPTH,
       threads: defaultAnalysisThreads(),
+      botId: DEFAULT_ANALYSIS_BOT_ID,
     };
   }
 }
@@ -170,6 +198,8 @@ type AppStore = {
   aiPlaying: boolean;
   aiStrength: AiStrengthLevel;
   setAiStrength: (v: AiStrengthLevel) => void;
+  aiBotId: BotId;
+  setAiBotId: (v: BotId) => void;
   /** Analysis board max search time (ms). */
   analysisTimeMs: AnalysisTimeMs;
   setAnalysisTimeMs: (v: AnalysisTimeMs) => void;
@@ -179,6 +209,8 @@ type AppStore = {
   /** Analysis board worker threads (no upper cap). */
   analysisThreads: AnalysisThreads;
   setAnalysisThreads: (v: AnalysisThreads) => void;
+  analysisBotId: BotId;
+  setAnalysisBotId: (v: BotId) => void;
   aiTimePreset: TimePresetId;
   setAiTimePreset: (v: TimePresetId) => void;
   onlineTimePreset: TimePresetId;
@@ -226,6 +258,11 @@ type AppStore = {
   consumePendingAnalysisId: () => string | null;
   setAnalysisCursor: (cursor: number) => void;
   clearAnalysis: () => void;
+  /** Live game history scrubber: 'live' = current position, number = replay index. */
+  liveReviewCursor: number | 'live';
+  liveReviewPositions: MatchState[];
+  setLiveReviewCursor: (cursor: number | 'live') => void;
+  goToLivePosition: () => void;
   resign: () => void;
 };
 
@@ -253,6 +290,38 @@ function openingSkipEntries(state: MatchState): MoveHistoryEntry[] {
   });
 }
 
+function syncLiveReview(
+  battleMode: BattleMode,
+  session: GameSession,
+  online: OnlineGameSession,
+  prevCursor: number | 'live',
+  prevPositions: MatchState[],
+): { liveReviewCursor: number | 'live'; liveReviewPositions: MatchState[] } {
+  const active = battleMode === 'online' ? online : session;
+  const replay = active.getReplay();
+  if (!replay) {
+    return { liveReviewCursor: 'live', liveReviewPositions: [] };
+  }
+  const positions = buildReplayPositions(replay.opening, replay.commands);
+  if (positions.length <= 1) {
+    return { liveReviewCursor: 'live', liveReviewPositions: positions };
+  }
+  const wasAtLive =
+    prevCursor === 'live' ||
+    (typeof prevCursor === 'number' && prevCursor >= Math.max(0, prevPositions.length - 1));
+  if (wasAtLive) {
+    return { liveReviewCursor: 'live', liveReviewPositions: positions };
+  }
+  const c = Math.max(
+    0,
+    Math.min(typeof prevCursor === 'number' ? prevCursor : 0, positions.length - 1),
+  );
+  if (c >= positions.length - 1) {
+    return { liveReviewCursor: 'live', liveReviewPositions: positions };
+  }
+  return { liveReviewCursor: c, liveReviewPositions: positions };
+}
+
 export const useAppStore = create<AppStore>((set, get) => {
   const appendEvents = (
     mode: BattleMode,
@@ -268,23 +337,39 @@ export const useAppStore = create<AppStore>((set, get) => {
       const freshOpening =
         state.phase === 'play' && state.turn === 1 && !state.extraMovePieceId;
       if (freshOpening && (currentMoveHistory.length === 0 || entries.length > 0 || mode === 'online')) {
+        const liveReview = syncLiveReview(
+          mode,
+          get().session,
+          get().online,
+          get().liveReviewCursor,
+          get().liveReviewPositions,
+        );
         set({
           state,
           events,
           lastError,
           moveHistory: entries,
           lastMove: null,
+          ...liveReview,
           ...(mode === 'online'
             ? { captures: { white: [] as string[], black: [] as string[] } }
             : {}),
         });
       } else if (entries.length > 0 && currentMoveHistory.length === 0) {
+        const liveReview = syncLiveReview(
+          mode,
+          get().session,
+          get().online,
+          get().liveReviewCursor,
+          get().liveReviewPositions,
+        );
         set({
           state,
           events,
           lastError,
           moveHistory: entries,
           lastMove: null,
+          ...liveReview,
         });
       } else {
         set({ state, events, lastError });
@@ -347,6 +432,13 @@ export const useAppStore = create<AppStore>((set, get) => {
       endBanner,
       captures: nextCaptures,
       moveHistory: nextHistory,
+      ...syncLiveReview(
+        mode,
+        get().session,
+        get().online,
+        get().liveReviewCursor,
+        get().liveReviewPositions,
+      ),
       ...(move ? { lastMove: move } : {}),
     });
   };
@@ -361,6 +453,10 @@ export const useAppStore = create<AppStore>((set, get) => {
   });
 
   const storedAnalysis = readStoredAnalysisEngine();
+  const initialAiStrength = readStoredAiStrength();
+  const initialAiBotId = readStoredAiBotId();
+  session.setAiBot(initialAiBotId);
+  session.setAiStrength(initialAiStrength);
 
   return {
     view: 'battle',
@@ -373,12 +469,19 @@ export const useAppStore = create<AppStore>((set, get) => {
       if (id) set({ pendingAnalysisId: null });
       return id;
     },
-    aiStrength: readStoredAiStrength(),
+    aiStrength: initialAiStrength,
     setAiStrength: (aiStrength) => {
       const next = clampAiStrength(aiStrength);
       writeStoredAiStrength(next);
       get().session.setAiStrength(next);
       set({ aiStrength: next });
+    },
+    aiBotId: initialAiBotId,
+    setAiBotId: (aiBotId) => {
+      const next = clampBotId(aiBotId);
+      writeStoredAiBotId(next);
+      get().session.setAiBot(next);
+      set({ aiBotId: next });
     },
     analysisTimeMs: storedAnalysis.timeMs,
     setAnalysisTimeMs: (analysisTimeMs) => {
@@ -387,6 +490,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         timeMs: next,
         depth: get().analysisDepth,
         threads: get().analysisThreads,
+        botId: get().analysisBotId,
       });
       set({ analysisTimeMs: next });
     },
@@ -397,6 +501,7 @@ export const useAppStore = create<AppStore>((set, get) => {
         timeMs: get().analysisTimeMs,
         depth: next,
         threads: get().analysisThreads,
+        botId: get().analysisBotId,
       });
       set({ analysisDepth: next });
     },
@@ -407,8 +512,20 @@ export const useAppStore = create<AppStore>((set, get) => {
         timeMs: get().analysisTimeMs,
         depth: get().analysisDepth,
         threads: next,
+        botId: get().analysisBotId,
       });
       set({ analysisThreads: next });
+    },
+    analysisBotId: storedAnalysis.botId,
+    setAnalysisBotId: (analysisBotId) => {
+      const next = clampBotId(analysisBotId);
+      writeStoredAnalysisEngine({
+        timeMs: get().analysisTimeMs,
+        depth: get().analysisDepth,
+        threads: get().analysisThreads,
+        botId: next,
+      });
+      set({ analysisBotId: next });
     },
     aiTimePreset: '10',
     setAiTimePreset: (aiTimePreset) => set({ aiTimePreset }),
@@ -430,6 +547,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           lastError: null,
           endBanner: null,
           analysis: idleAnalysis(),
+          liveReviewCursor: 'live',
+          liveReviewPositions: [],
           clocks: freshClocks(null),
           state: session.getState(),
         });
@@ -445,6 +564,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),
+        liveReviewCursor: 'live',
+        liveReviewPositions: [],
         clocks: freshClocks(null),
         state: o.getState(),
       });
@@ -524,7 +645,8 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ endBanner: null });
     },
     resign: () => {
-      const { battleMode, session: s, online: o, endBanner, state, aiPlaying } = get();
+      const { battleMode, session: s, online: o, endBanner, state, aiPlaying, liveReviewCursor } = get();
+      if (liveReviewCursor !== 'live') return;
       if (endBanner || state.phase === 'gameOver') return;
 
       if (battleMode === 'ai') {
@@ -588,6 +710,29 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ analysis: { ...analysis, cursor: c }, selected: null, abilityArmed: null });
     },
     clearAnalysis: () => set({ analysis: idleAnalysis() }),
+    liveReviewCursor: 'live',
+    liveReviewPositions: [],
+    setLiveReviewCursor: (cursor) => {
+      const { liveReviewPositions, analysis } = get();
+      if (analysis.status === 'done' || analysis.status === 'running') return;
+      if (liveReviewPositions.length === 0) {
+        set({ liveReviewCursor: 'live', selected: null, abilityArmed: null });
+        return;
+      }
+      if (cursor === 'live') {
+        set({ liveReviewCursor: 'live', selected: null, abilityArmed: null });
+        return;
+      }
+      const c = Math.max(0, Math.min(liveReviewPositions.length - 1, Math.floor(cursor)));
+      if (c >= liveReviewPositions.length - 1) {
+        set({ liveReviewCursor: 'live', selected: null, abilityArmed: null });
+      } else {
+        set({ liveReviewCursor: c, selected: null, abilityArmed: null });
+      }
+    },
+    goToLivePosition: () => {
+      get().setLiveReviewCursor('live');
+    },
     submitMove: (to, abilityId) => {
       const {
         selected,
@@ -599,7 +744,9 @@ export const useAppStore = create<AppStore>((set, get) => {
         state,
         endBanner,
         aiPlaying,
+        liveReviewCursor,
       } = get();
+      if (liveReviewCursor !== 'live') return;
       if (endBanner || state.phase === 'gameOver') return;
       if (battleMode === 'ai' && !aiPlaying) return;
       if (!selected) return;
@@ -650,8 +797,9 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ selected: null, abilityArmed: null });
     },
     finishExtraMove: () => {
-      const { battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying } =
+      const { battleMode, session: s, online: o, canControl, state, endBanner, aiPlaying, liveReviewCursor } =
         get();
+      if (liveReviewCursor !== 'live') return;
       if (endBanner || state.phase === 'gameOver' || state.phase !== 'play') return;
       if (battleMode === 'ai' && !aiPlaying) return;
       if (!state.extraMovePieceId) return;
@@ -665,17 +813,22 @@ export const useAppStore = create<AppStore>((set, get) => {
       set({ selected: null, abilityArmed: null });
     },
     startAiMatch: () => {
-      const { repo: r, activeDeckId, session: s, aiStrength, aiTimePreset } = get();
+      const { repo: r, activeDeckId, session: s, aiStrength, aiBotId, aiTimePreset } = get();
       const deck = r.getDeck(activeDeckId);
       if (!deck || deck.placements.length < 16) {
         set({ lastError: 'Выберите полную сохранённую колоду' });
         return;
       }
+      s.setAiBot(aiBotId);
       s.setAiStrength(aiStrength);
       s.restart(deck);
       const startState = s.getState();
       const ms = timePresetMs(aiTimePreset);
       const openingHistory = openingSkipEntries(startState);
+      const replay = s.getReplay();
+      const liveReviewPositions = replay
+        ? buildReplayPositions(replay.opening, replay.commands)
+        : [];
       set({
         aiPlaying: true,
         selected: null,
@@ -685,6 +838,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),
+        liveReviewCursor: 'live',
+        liveReviewPositions,
         clocks: freshClocks(startState.activePlayer, ms),
         state: startState,
         view: 'battle',
@@ -703,6 +858,8 @@ export const useAppStore = create<AppStore>((set, get) => {
           lastError: null,
           endBanner: null,
           analysis: idleAnalysis(),
+          liveReviewCursor: 'live',
+          liveReviewPositions: [],
           clocks: freshClocks(null),
           state: o.getState(),
         });
@@ -717,6 +874,8 @@ export const useAppStore = create<AppStore>((set, get) => {
         lastError: null,
         endBanner: null,
         analysis: idleAnalysis(),
+        liveReviewCursor: 'live',
+        liveReviewPositions: [],
         clocks: freshClocks(null),
         state: session.getState(),
       });

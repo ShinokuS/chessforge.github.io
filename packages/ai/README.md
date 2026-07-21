@@ -1,9 +1,23 @@
 # @chessforge/ai
 
-Stockfish-style поисковый движок Chessforge на TypeScript. Правила, способности,
-HP и тайлы исполняются только пакетом `@chessforge/engine`.
+Поисковые боты Chessforge на TypeScript. Правила, способности, HP и тайлы
+исполняются только пакетом `@chessforge/engine`.
 
-## Архитектура
+## Боты
+
+Все реализации живут в `src/bots/` и регистрируются в общем реестре. Клиент
+выбирает бота через `engine: BotId` в опциях поиска (`listBots()` / `getBot(id)`).
+
+Сейчас доступны:
+
+- **stockfish** — Stockfish-style PVS / iterative deepening (по умолчанию);
+- **forgefish** — нативный Chessforge-поиск (make/unmake, HP-SEE, DPA, MidEval);
+- **legacy** — упрощённый alpha-beta для сравнения и fallback.
+
+Новый бот: реализовать интерфейс `Bot` (`choose` + `search`, опционально score*)
+и вызвать `registerBot(...)` в `bots/index.ts`.
+
+## Архитектура поиска (stockfish)
 
 - iterative deepening и aspiration windows;
 - fail-soft PVS alpha-beta;
@@ -12,7 +26,8 @@ HP и тайлы исполняются только пакетом `@chessforge
 - TT/capture/killer/counter/history ordering;
 - late move reductions с полным re-search;
 - отдельные soft/hard time и node limits;
-- динамический root split между Web Workers;
+- динамический root split между Web Workers (capability `rootSplit`);
+- Lazy SMP в анализе (capability `lazySmp`);
 - legacy fallback для сравнения и аварийного восстановления.
 
 `endTurn` является настоящим игровым действием, поэтому шахматный null-move
@@ -22,7 +37,7 @@ pruning отключён. При extra move знак оценки меняетс
 ## Использование
 
 ```ts
-import { chooseCommand, searchPosition } from '@chessforge/ai';
+import { chooseCommand, listBots, searchPosition } from '@chessforge/ai';
 
 const command = chooseCommand(state, {
   maxDepth: 8,
@@ -30,17 +45,18 @@ const command = chooseCommand(state, {
   nodeLimit: 500_000,
   ttBits: 18,
   skill: 10,
+  engine: 'stockfish',
 });
 
 const analysis = searchPosition(state, {
   maxDepth: 10,
   timeMs: 5_000,
   nodeLimit: 1_000_000,
+  engine: 'legacy',
 });
-```
 
-Для принудительного сравнения доступно `engine: 'legacy'`; основной режим —
-`engine: 'stockfish'`.
+console.log(listBots().map((b) => b.label));
+```
 
 ## Benchmark
 

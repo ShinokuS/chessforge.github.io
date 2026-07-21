@@ -1,6 +1,6 @@
 /** Analysis board engine settings (Lichess-style panel). */
 
-import type { ChooseOptions } from '@chessforge/ai';
+import { clampBotId, DEFAULT_BOT_ID, type BotId, type ChooseOptions } from '@chessforge/ai';
 
 export type AnalysisDepth = number;
 export type AnalysisThreads = number;
@@ -12,7 +12,7 @@ export const ANALYSIS_DEPTH_OPTIONS = [6, 8, 10, 12, 14, 16, 18, 20, 22, 24] as 
 
 export const DEFAULT_ANALYSIS_TIME_MS: AnalysisTimeMs = 0;
 export const DEFAULT_ANALYSIS_DEPTH: AnalysisDepth = 14;
-export const ANALYSIS_ENGINE_LABEL = 'Stockfish';
+export const DEFAULT_ANALYSIS_BOT_ID: BotId = DEFAULT_BOT_ID;
 
 /** Ms budget per iterative-deepening step (live + full-game ramp). */
 export const ANALYSIS_DEPTH_SLICE_MS = 200;
@@ -56,6 +56,7 @@ export function analysisTtBits(depthOrTime: number): number {
 export function buildAnalysisSearchOptions(input: {
   maxDepth: number;
   startDepth?: number;
+  engine?: BotId;
 }): ChooseOptions {
   const maxDepth = clampAnalysisDepth(input.maxDepth);
   return {
@@ -66,7 +67,7 @@ export function buildAnalysisSearchOptions(input: {
     nodeLimit: 250_000_000,
     skill: 10,
     ttBits: Math.min(18, analysisTtBits(maxDepth)),
-    engine: 'stockfish',
+    engine: clampBotId(input.engine ?? DEFAULT_ANALYSIS_BOT_ID),
     workers: 1,
     fastAnalysis: true,
   };

@@ -1,4 +1,5 @@
 import type { GameCommand, LegalMove, MatchState, PlayerId } from '@chessforge/engine';
+import type { BotId } from '../bots/types.js';
 
 export const INF = 1_500_000;
 export const MATE = 1_000_000;
@@ -23,7 +24,8 @@ export type SearchOptions = {
   /** Approximate local transposition-table memory cap per worker. */
   memoryMb?: number;
   batch?: boolean;
-  engine?: 'stockfish' | 'legacy';
+  /** Registered bot id (`stockfish`, `legacy`, …). */
+  engine?: BotId;
   /**
    * Slightly leaner LMR only. Does not change root width or invent depth —
    * timed searches still report only completed ID iterations.

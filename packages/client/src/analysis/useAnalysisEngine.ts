@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   evaluateSearch,
   hashPosition,
+  type BotId,
   type ChooseOptions,
   type SearchResult,
 } from '@chessforge/ai';
@@ -12,6 +13,7 @@ import {
   clampAnalysisDepth,
   clampAnalysisThreads,
   buildAnalysisSearchOptions,
+  DEFAULT_ANALYSIS_BOT_ID,
   type AnalysisDepth,
   type AnalysisThreads,
 } from './analysisSettings';
@@ -32,6 +34,7 @@ export type AnalysisEngineState = {
 export type AnalysisEngineOptions = {
   depth: AnalysisDepth;
   threads: AnalysisThreads;
+  botId?: BotId;
 };
 
 type CacheEntry = {
@@ -114,8 +117,16 @@ function rememberEval(state: MatchState, line: EngineLine): void {
 }
 
 /** Live: ∞ time until maxDepth; same depth ramp as full-game. */
-function analysisOptions(maxDepth: number, startDepth: number, _threads: number): ChooseOptions {
-  return buildAnalysisSearchOptions({ maxDepth, startDepth });
+function analysisOptions(
+  maxDepth: number,
+  startDepth: number,
+  botId: BotId,
+  threads: number,
+): ChooseOptions {
+  return {
+    ...buildAnalysisSearchOptions({ maxDepth, startDepth, engine: botId }),
+    workers: threads,
+  };
 }
 
 function cacheKey(positionHash: number): string {
@@ -205,6 +216,7 @@ export function useAnalysisEngine(
 
   const maxDepth = clampAnalysisDepth(options.depth);
   const threads = clampAnalysisThreads(options.threads);
+  const botId = options.botId ?? DEFAULT_ANALYSIS_BOT_ID;
   const positionHash = hashPosition(state);
 
   useEffect(() => {
@@ -267,7 +279,7 @@ export function useAnalysisEngine(
 
         const result = await pool.searchPosition(
           state,
-          analysisOptions(maxDepth, startDepth, threads),
+          analysisOptions(maxDepth, startDepth, botId, threads),
           { onProgress: applyPartial },
         );
         if (cancelled || genRef.current !== gen) return;
@@ -287,7 +299,7 @@ export function useAnalysisEngine(
         getAiPool().cancelAnalysis();
       }
     };
-  }, [positionHash, enabled, maxDepth, threads, state]);
+  }, [positionHash, enabled, maxDepth, threads, botId, state]);
 
   return { enabled, running, lines, error };
 }

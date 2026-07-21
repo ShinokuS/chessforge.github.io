@@ -17,6 +17,8 @@ export const ARMABLE_ABILITIES: ReadonlySet<AbilityId> = new Set([
   'spikeTile',
   'cloakPawn',
   'judgeBless',
+  'heartEat',
+  'throwSpear',
 ]);
 
 /** Toggleable board actions: abilities + ram push. */
@@ -36,6 +38,8 @@ export const ABILITY_LABEL: Record<AbilityId, string> = {
   curseEnemy: 'Проклятие',
   spikeTile: 'Шипы',
   cloakPawn: 'Покров',
+  heartEat: 'Сердцеедка',
+  throwSpear: 'Копьё',
   doubleMove: 'Двойной ход',
 };
 

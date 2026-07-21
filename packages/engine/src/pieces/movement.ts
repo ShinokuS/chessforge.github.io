@@ -1,7 +1,7 @@
-import type { Coord, PlayerId } from '../board/types.js';
-import { coordsEqual, inBounds } from '../board/types.js';
-import { findCavePartner, getTileDef, isPassable } from '../board/board.js';
-import { getPieceDefinition } from '../defs/catalog.js';
+import type { Coord, PlayerId } from "../board/types.js";
+import { coordsEqual, inBounds } from "../board/types.js";
+import { findCavePartner, getTileDef, isPassable } from "../board/board.js";
+import { getPieceDefinition } from "../defs/catalog.js";
 import type {
   AbilityId,
   MatchState,
@@ -9,7 +9,7 @@ import type {
   PieceInstance,
   PieceRole,
   SlidePattern,
-} from '../match/types.js';
+} from "../match/types.js";
 
 export type LegalMove = {
   from: Coord;
@@ -17,7 +17,7 @@ export type LegalMove = {
   captures: boolean;
   targetPieceId?: string;
   abilityId?: AbilityId;
-  castle?: 'kingside' | 'queenside';
+  castle?: "kingside" | "queenside";
   /** Ram push: target is shoved to `to`, mover stays. */
   push?: boolean;
 };
@@ -33,15 +33,30 @@ const KING_OFFSETS: Coord[] = [
   { x: -1, y: -1 },
 ];
 
+const KNIGHT_OFFSETS: Coord[] = [
+  { x: 1, y: 2 },
+  { x: 2, y: 1 },
+  { x: -1, y: 2 },
+  { x: -2, y: 1 },
+  { x: 1, y: -2 },
+  { x: 2, y: -1 },
+  { x: -1, y: -2 },
+  { x: -2, y: -1 },
+];
+
 function facingSign(owner: PlayerId): number {
-  return owner === 'white' ? 1 : -1;
+  return owner === "white" ? 1 : -1;
 }
 
 function orientOffset(owner: PlayerId, offset: Coord): Coord {
   return { x: offset.x, y: offset.y * facingSign(owner) };
 }
 
-function pieceAt(state: MatchState, pos: Coord, grid?: PieceGrid): PieceInstance | undefined {
+function pieceAt(
+  state: MatchState,
+  pos: Coord,
+  grid?: PieceGrid,
+): PieceInstance | undefined {
   if (grid) return grid[pos.y * state.board.width + pos.x];
   return state.pieces.find((p) => coordsEqual(p.pos, pos));
 }
@@ -95,7 +110,12 @@ function gcd(a: number, b: number): number {
  * For multi-step leaps (pawn double-push, spearman ×2, mountain-extended…),
  * intermediate squares must be empty and passable. Knight-like leaps (gcd=1) skip this.
  */
-function pathClear(state: MatchState, from: Coord, to: Coord, grid?: PieceGrid): boolean {
+function pathClear(
+  state: MatchState,
+  from: Coord,
+  to: Coord,
+  grid?: PieceGrid,
+): boolean {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const steps = gcd(dx, dy);
@@ -111,7 +131,7 @@ function pathClear(state: MatchState, from: Coord, to: Coord, grid?: PieceGrid):
 }
 
 function isKingRole(defId: string): boolean {
-  return getPieceDefinition(defId).baseRole === 'king';
+  return getPieceDefinition(defId).baseRole === "king";
 }
 
 function isRoyalPiece(p: PieceInstance): boolean {
@@ -151,20 +171,20 @@ function tryAddMove(
   state: MatchState,
   from: Coord,
   to: Coord,
-  mode: 'quiet' | 'capture' | 'both',
+  mode: "quiet" | "capture" | "both",
   out: LegalMove[],
   abilityId?: AbilityId,
   grid?: PieceGrid,
-): 'empty' | 'blocked' | 'edge' {
+): "empty" | "blocked" | "edge" {
   const { board } = state;
-  if (!inBounds(to, board.width, board.height)) return 'edge';
-  if (!isPassable(board, to)) return 'blocked';
-  if (!pathClear(state, from, to, grid)) return 'blocked';
+  if (!inBounds(to, board.width, board.height)) return "edge";
+  if (!isPassable(board, to)) return "blocked";
+  if (!pathClear(state, from, to, grid)) return "blocked";
 
   const mover = pieceAt(state, from, grid);
   const occupant = pieceAt(state, to, grid);
   if (!occupant) {
-    if (mode === 'quiet' || mode === 'both') {
+    if (mode === "quiet" || mode === "both") {
       out.push({
         from,
         to,
@@ -172,17 +192,14 @@ function tryAddMove(
         ...(abilityId !== undefined ? { abilityId } : {}),
       });
     }
-    return 'empty';
+    return "empty";
   }
-  if (mover && occupant.owner === mover.owner) return 'blocked';
-  if ((occupant.shieldTurns ?? 0) > 0) return 'blocked';
-  if (
-    mover?.cursedCannotHarmId &&
-    occupant.id === mover.cursedCannotHarmId
-  ) {
-    return 'blocked';
+  if (mover && occupant.owner === mover.owner) return "blocked";
+  if ((occupant.shieldTurns ?? 0) > 0) return "blocked";
+  if (mover?.cursedCannotHarmId && occupant.id === mover.cursedCannotHarmId) {
+    return "blocked";
   }
-  if (mode === 'capture' || mode === 'both') {
+  if (mode === "capture" || mode === "both") {
     out.push({
       from,
       to,
@@ -191,34 +208,37 @@ function tryAddMove(
       ...(abilityId !== undefined ? { abilityId } : {}),
     });
   }
-  return 'blocked';
+  return "blocked";
 }
 
 function expandPattern(
   state: MatchState,
   mover: PieceInstance,
   pattern: MovementPattern,
-  mode: 'quiet' | 'capture' | 'both',
+  mode: "quiet" | "capture" | "both",
   grid?: PieceGrid,
 ): LegalMove[] {
   const moves: LegalMove[] = [];
   const leapBonus = mountainLeapBonus(state, mover);
 
-  if (pattern.kind === 'conditional') {
-    if (pattern.when === 'neverMoved' && mover.hasMoved) return moves;
+  if (pattern.kind === "conditional") {
+    if (pattern.when === "neverMoved" && mover.hasMoved) return moves;
     for (const nested of pattern.patterns) {
       moves.push(...expandPattern(state, mover, nested, mode, grid));
     }
     return moves;
   }
 
-  if (pattern.kind === 'leap') {
+  if (pattern.kind === "leap") {
     for (const raw of pattern.offsets) {
       const base = orientOffset(mover.owner, raw);
       const to = { x: mover.pos.x + base.x, y: mover.pos.y + base.y };
       tryAddMove(state, mover.pos, to, mode, moves, undefined, grid);
       if (leapBonus > 0 && raw.x === 0 && raw.y > 0) {
-        const extended = orientOffset(mover.owner, { x: 0, y: raw.y + leapBonus });
+        const extended = orientOffset(mover.owner, {
+          x: 0,
+          y: raw.y + leapBonus,
+        });
         tryAddMove(
           state,
           mover.pos,
@@ -240,14 +260,26 @@ function expandPattern(
         x: mover.pos.x + dir.x * step,
         y: mover.pos.y + dir.y * step,
       };
-      const result = tryAddMove(state, mover.pos, to, mode, moves, undefined, grid);
-      if (result !== 'empty') break;
+      const result = tryAddMove(
+        state,
+        mover.pos,
+        to,
+        mode,
+        moves,
+        undefined,
+        grid,
+      );
+      if (result !== "empty") break;
     }
   }
   return moves;
 }
 
-function applyMudCap(state: MatchState, mover: PieceInstance, moves: LegalMove[]): LegalMove[] {
+function applyMudCap(
+  state: MatchState,
+  mover: PieceInstance,
+  moves: LegalMove[],
+): LegalMove[] {
   const tile = getTileDef(state.board, mover.pos);
   if (!tile?.movementCap) return moves;
   const def = getPieceDefinition(mover.defId);
@@ -268,9 +300,12 @@ function isMarshSlowed(state: MatchState, mover: PieceInstance): boolean {
 }
 
 /** True if an enemy marsh aura currently caps this piece's move distance (knights ignore it). */
-export function isPieceMarshSlowed(state: MatchState, piece: PieceInstance): boolean {
+export function isPieceMarshSlowed(
+  state: MatchState,
+  piece: PieceInstance,
+): boolean {
   const def = getPieceDefinition(piece.defId);
-  if (def.baseRole === 'knight') return false;
+  if (def.baseRole === "knight") return false;
   return isMarshSlowed(state, piece);
 }
 
@@ -281,15 +316,20 @@ function applyMarshAuraCap(
   marshSlowed?: Set<string>,
 ): LegalMove[] {
   const slowed =
-    marshSlowed !== undefined ? marshSlowed.has(mover.id) : isMarshSlowed(state, mover);
+    marshSlowed !== undefined
+      ? marshSlowed.has(mover.id)
+      : isMarshSlowed(state, mover);
   if (!slowed) return moves;
   const def = getPieceDefinition(mover.defId);
   const cap = 1;
-  if (def.baseRole === 'knight') return moves;
+  if (def.baseRole === "knight") return moves;
   return moves.filter((m) => m.push || chebyshev(m.from, m.to) <= cap);
 }
 
-function getLineBuffTargets(state: MatchState, buffer: PieceInstance): PieceInstance[] {
+function getLineBuffTargets(
+  state: MatchState,
+  buffer: PieceInstance,
+): PieceInstance[] {
   const def = getPieceDefinition(buffer.defId);
   if (!def.lineBuff) return [];
   const targets: PieceInstance[] = [];
@@ -327,7 +367,11 @@ export function getBuffedPieceIds(state: MatchState): Set<string> {
   return ids;
 }
 
-function addRoyalEscortMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addRoyalEscortMoves(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.royalEscort) return;
   const kingNear = state.pieces.some(
@@ -341,33 +385,41 @@ function addRoyalEscortMoves(state: MatchState, piece: PieceInstance, out: Legal
   addKingAuraMoves(state, piece, out);
 }
 
-function addKingAuraMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addKingAuraMoves(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   for (const off of KING_OFFSETS) {
     const to = { x: piece.pos.x + off.x, y: piece.pos.y + off.y };
-    tryAddMove(state, piece.pos, to, 'both', out);
+    tryAddMove(state, piece.pos, to, "both", out);
   }
 }
 
-function addCastlingMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addCastlingMoves(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   if (!isKingRole(piece.defId) || piece.hasMoved) return;
   if (piece.pos.x !== 4) return; // classic e-file
 
   const rank = piece.pos.y;
   const sides: Array<{
-    side: 'kingside' | 'queenside';
+    side: "kingside" | "queenside";
     rookX: number;
     kingTo: number;
     path: number[];
   }> = [
-    { side: 'kingside', rookX: 7, kingTo: 6, path: [5, 6] },
-    { side: 'queenside', rookX: 0, kingTo: 2, path: [1, 2, 3] },
+    { side: "kingside", rookX: 7, kingTo: 6, path: [5, 6] },
+    { side: "queenside", rookX: 0, kingTo: 2, path: [1, 2, 3] },
   ];
 
   for (const s of sides) {
     const rook = state.pieces.find(
       (p) =>
         p.owner === piece.owner &&
-        getPieceDefinition(p.defId).baseRole === 'rook' &&
+        getPieceDefinition(p.defId).baseRole === "rook" &&
         p.pos.y === rank &&
         p.pos.x === s.rookX &&
         !p.hasMoved,
@@ -393,7 +445,11 @@ function addCastlingMoves(state: MatchState, piece: PieceInstance, out: LegalMov
   }
 }
 
-function addCaveMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addCaveMoves(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   const tile = getTileDef(state.board, piece.pos);
   if (!tile?.caveGroup) return;
   const partner = findCavePartner(state.board, piece.pos);
@@ -407,7 +463,11 @@ function addCaveMoves(state: MatchState, piece: PieceInstance, out: LegalMove[])
   });
 }
 
-function addFreezeTargets(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addFreezeTargets(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.freezeInsteadOfCapture) return;
   if ((piece.freezeCooldown ?? 0) > 0) return;
@@ -425,7 +485,11 @@ function addFreezeTargets(state: MatchState, piece: PieceInstance, out: LegalMov
   }
 }
 
-function addRamPush(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addRamPush(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.pushForward) return;
   const fwd = facingSign(piece.owner);
@@ -447,45 +511,67 @@ function addRamPush(state: MatchState, piece: PieceInstance, out: LegalMove[]): 
   });
 }
 
-function abilityReady(piece: PieceInstance, abilityId: AbilityId, cooldownTurns?: number): boolean {
+function abilityReady(
+  piece: PieceInstance,
+  abilityId: AbilityId,
+  cooldownTurns?: number,
+): boolean {
   if (cooldownTurns !== undefined) {
     return (piece.abilityCooldowns?.[abilityId] ?? 0) <= 0;
   }
   return !piece.abilitiesUsed[abilityId];
 }
 
-function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addAbilityMoves(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.abilities) return;
 
   for (const ability of def.abilities) {
     if (!abilityReady(piece, ability.id, ability.cooldownTurns)) continue;
 
-    if (ability.id === 'retreat') {
+    if (ability.id === "retreat") {
       const backDir = { x: 0, y: -facingSign(piece.owner) };
       for (let step = 1; step <= 8; step++) {
         const to = {
           x: piece.pos.x + backDir.x * step,
           y: piece.pos.y + backDir.y * step,
         };
-        const result = tryAddMove(state, piece.pos, to, 'quiet', out, 'retreat');
-        if (result !== 'empty') break;
+        const result = tryAddMove(
+          state,
+          piece.pos,
+          to,
+          "quiet",
+          out,
+          "retreat",
+        );
+        if (result !== "empty") break;
       }
     }
 
-    if (ability.id === 'royalWarp') {
-      const royal = state.pieces.find((p) => p.owner === piece.owner && isRoyalPiece(p));
+    if (ability.id === "royalWarp") {
+      const royal = state.pieces.find(
+        (p) => p.owner === piece.owner && isRoyalPiece(p),
+      );
       if (!royal) continue;
       for (const off of KING_OFFSETS) {
         const to = { x: royal.pos.x + off.x, y: royal.pos.y + off.y };
         if (!inBounds(to, state.board.width, state.board.height)) continue;
         if (!isPassable(state.board, to)) continue;
         if (pieceAt(state, to)) continue;
-        out.push({ from: piece.pos, to, captures: false, abilityId: 'royalWarp' });
+        out.push({
+          from: piece.pos,
+          to,
+          captures: false,
+          abilityId: "royalWarp",
+        });
       }
     }
 
-    if (ability.id === 'allyLeap') {
+    if (ability.id === "allyLeap") {
       for (const dir of [
         { x: 1, y: 0 },
         { x: -1, y: 0 },
@@ -496,7 +582,8 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
         const land = { x: piece.pos.x + dir.x * 2, y: piece.pos.y + dir.y * 2 };
         if (!inBounds(mid, state.board.width, state.board.height)) continue;
         if (!inBounds(land, state.board.width, state.board.height)) continue;
-        if (!isPassable(state.board, mid) || !isPassable(state.board, land)) continue;
+        if (!isPassable(state.board, mid) || !isPassable(state.board, land))
+          continue;
         const jumpee = pieceAt(state, mid);
         if (!jumpee || jumpee.owner !== piece.owner) continue;
         if (pieceAt(state, land)) continue;
@@ -504,14 +591,14 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
           from: { ...piece.pos },
           to: land,
           captures: false,
-          abilityId: 'allyLeap',
+          abilityId: "allyLeap",
         });
       }
     }
 
-    if (ability.id === 'allySwap') {
+    if (ability.id === "allySwap") {
       for (const pattern of def.movement) {
-        if (pattern.kind !== 'slide') continue;
+        if (pattern.kind !== "slide") continue;
         const maxRange = resolveSlideRange(state, piece, pattern);
         for (const dir of pattern.directions) {
           for (let step = 1; step <= maxRange; step++) {
@@ -529,7 +616,7 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
                 to: { ...hit.pos },
                 captures: false,
                 targetPieceId: hit.id,
-                abilityId: 'allySwap',
+                abilityId: "allySwap",
               });
             }
             break;
@@ -538,7 +625,7 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
       }
     }
 
-    if (ability.id === 'blessHeal') {
+    if (ability.id === "blessHeal") {
       for (const ally of state.pieces) {
         if (ally.owner !== piece.owner || ally.id === piece.id) continue;
         if (chebyshev(piece.pos, ally.pos) > 3) continue;
@@ -547,26 +634,26 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
           to: { ...ally.pos },
           captures: false,
           targetPieceId: ally.id,
-          abilityId: 'blessHeal',
+          abilityId: "blessHeal",
         });
       }
     }
 
-    if (ability.id === 'abdicate') {
+    if (ability.id === "abdicate") {
       for (const ally of state.pieces) {
         if (ally.owner !== piece.owner || ally.id === piece.id) continue;
-        if (getPieceDefinition(ally.defId).baseRole !== 'queen') continue;
+        if (getPieceDefinition(ally.defId).baseRole !== "queen") continue;
         out.push({
           from: { ...piece.pos },
           to: { ...ally.pos },
           captures: false,
           targetPieceId: ally.id,
-          abilityId: 'abdicate',
+          abilityId: "abdicate",
         });
       }
     }
 
-    if (ability.id === 'grantShield') {
+    if (ability.id === "grantShield") {
       for (const ally of state.pieces) {
         if (ally.owner !== piece.owner || ally.id === piece.id) continue;
         out.push({
@@ -574,29 +661,29 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
           to: { ...ally.pos },
           captures: false,
           targetPieceId: ally.id,
-          abilityId: 'grantShield',
+          abilityId: "grantShield",
         });
       }
     }
 
-    if (ability.id === 'designatePromote') {
+    if (ability.id === "designatePromote") {
       for (const ally of state.pieces) {
         if (ally.owner !== piece.owner) continue;
-        if (getPieceDefinition(ally.defId).baseRole !== 'pawn') continue;
+        if (getPieceDefinition(ally.defId).baseRole !== "pawn") continue;
         if (ally.promotesToBaseQueen) continue;
         out.push({
           from: { ...piece.pos },
           to: { ...ally.pos },
           captures: false,
           targetPieceId: ally.id,
-          abilityId: 'designatePromote',
+          abilityId: "designatePromote",
         });
       }
     }
 
     // frontBless is passive (auto) — not a clickable ability move.
 
-    if (ability.id === 'curseEnemy') {
+    if (ability.id === "curseEnemy") {
       for (const enemy of state.pieces) {
         if (enemy.owner === piece.owner) continue;
         out.push({
@@ -604,26 +691,58 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
           to: { ...enemy.pos },
           captures: false,
           targetPieceId: enemy.id,
-          abilityId: 'curseEnemy',
+          abilityId: "curseEnemy",
         });
       }
     }
 
-    if (ability.id === 'cloakPawn') {
+    if (ability.id === "cloakPawn") {
       for (const ally of state.pieces) {
         if (ally.owner !== piece.owner) continue;
-        if (getPieceDefinition(ally.defId).baseRole !== 'pawn') continue;
+        if (getPieceDefinition(ally.defId).baseRole !== "pawn") continue;
         out.push({
           from: { ...piece.pos },
           to: { ...ally.pos },
           captures: false,
           targetPieceId: ally.id,
-          abilityId: 'cloakPawn',
+          abilityId: "cloakPawn",
         });
       }
     }
 
-    if (ability.id === 'judgeBless') {
+    if (ability.id === "heartEat") {
+      for (const enemy of state.pieces) {
+        if (enemy.owner === piece.owner) continue;
+        if (enemy.hp <= 1) continue;
+        out.push({
+          from: { ...piece.pos },
+          to: { ...enemy.pos },
+          captures: false,
+          targetPieceId: enemy.id,
+          abilityId: "heartEat",
+        });
+      }
+    }
+
+    if (ability.id === "throwSpear") {
+      for (const raw of KNIGHT_OFFSETS) {
+        const base = orientOffset(piece.owner, raw);
+        const to = { x: piece.pos.x + base.x, y: piece.pos.y + base.y };
+        if (!inBounds(to, state.board.width, state.board.height)) continue;
+        const enemy = pieceAt(state, to);
+        if (!enemy || enemy.owner === piece.owner) continue;
+        if ((enemy.shieldTurns ?? 0) > 0) continue;
+        out.push({
+          from: { ...piece.pos },
+          to,
+          captures: true,
+          targetPieceId: enemy.id,
+          abilityId: "throwSpear",
+        });
+      }
+    }
+
+    if (ability.id === "judgeBless") {
       if (state.turn < 10) continue;
       const mine = state.pieces.filter((p) => p.owner === piece.owner).length;
       const theirs = state.pieces.filter((p) => p.owner !== piece.owner).length;
@@ -635,19 +754,23 @@ function addAbilityMoves(state: MatchState, piece: PieceInstance, out: LegalMove
           to: { ...ally.pos },
           captures: false,
           targetPieceId: ally.id,
-          abilityId: 'judgeBless',
+          abilityId: "judgeBless",
         });
       }
     }
   }
 }
 
-function addSpikePlacerMoves(state: MatchState, piece: PieceInstance, out: LegalMove[]): void {
+function addSpikePlacerMoves(
+  state: MatchState,
+  piece: PieceInstance,
+  out: LegalMove[],
+): void {
   const def = getPieceDefinition(piece.defId);
   if (!def.spikePlacer) return;
   if (piece.abilitiesUsed.spikeTile) return;
   for (const pattern of def.movement) {
-    if (pattern.kind !== 'slide') continue;
+    if (pattern.kind !== "slide") continue;
     const maxRange = resolveSlideRange(state, piece, pattern);
     for (const dir of pattern.directions) {
       for (let step = 1; step <= maxRange; step++) {
@@ -657,12 +780,12 @@ function addSpikePlacerMoves(state: MatchState, piece: PieceInstance, out: Legal
         };
         if (!inBounds(to, state.board.width, state.board.height)) break;
         const tileId = state.board.tiles[to.y]?.[to.x];
-        if (tileId !== 'plain') break;
+        if (tileId !== "plain") break;
         out.push({
           from: { ...piece.pos },
           to,
           captures: false,
-          abilityId: 'spikeTile',
+          abilityId: "spikeTile",
         });
         if (pieceAt(state, to)) break;
       }
@@ -674,7 +797,7 @@ function dedupeMoves(moves: LegalMove[]): LegalMove[] {
   const seen = new Set<string>();
   const out: LegalMove[] = [];
   for (const m of moves) {
-    const key = `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.captures}:${m.abilityId ?? ''}:${m.castle ?? ''}:${m.push ? 1 : 0}:${m.targetPieceId ?? ''}`;
+    const key = `${m.from.x},${m.from.y}->${m.to.x},${m.to.y}:${m.captures}:${m.abilityId ?? ""}:${m.castle ?? ""}:${m.push ? 1 : 0}:${m.targetPieceId ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(m);
@@ -687,7 +810,7 @@ export function getLegalMovesForPiece(
   piece: PieceInstance,
   cache?: MoveGenCache,
 ): LegalMove[] {
-  if (state.phase !== 'play') return [];
+  if (state.phase !== "play") return [];
   if (piece.owner !== state.activePlayer) return [];
   if (state.extraMovePieceId && state.extraMovePieceId !== piece.id) return [];
   if ((piece.frozenTurns ?? 0) > 0) return [];
@@ -700,12 +823,12 @@ export function getLegalMovesForPiece(
 
   if (def.freezeInsteadOfCapture) {
     for (const pattern of def.movement) {
-      moves.push(...expandPattern(state, piece, pattern, 'quiet', grid));
+      moves.push(...expandPattern(state, piece, pattern, "quiet", grid));
     }
     addFreezeTargets(state, piece, moves);
   } else if (def.splitCapture && def.captureOffsets && !def.cannotCapture) {
     for (const pattern of def.movement) {
-      moves.push(...expandPattern(state, piece, pattern, 'quiet', grid));
+      moves.push(...expandPattern(state, piece, pattern, "quiet", grid));
     }
     const leapBonus = mountainLeapBonus(state, piece);
     for (const raw of def.captureOffsets) {
@@ -714,10 +837,10 @@ export function getLegalMovesForPiece(
         offset = orientOffset(piece.owner, { x: 0, y: raw.y + leapBonus });
       }
       const to = { x: piece.pos.x + offset.x, y: piece.pos.y + offset.y };
-      tryAddMove(state, piece.pos, to, 'capture', moves, undefined, grid);
+      tryAddMove(state, piece.pos, to, "capture", moves, undefined, grid);
     }
   } else {
-    const captureMode = def.cannotCapture ? 'quiet' : 'both';
+    const captureMode = def.cannotCapture ? "quiet" : "both";
     for (const pattern of def.movement) {
       moves.push(...expandPattern(state, piece, pattern, captureMode, grid));
     }
@@ -769,7 +892,9 @@ export function findLegalMove(
 ): LegalMove | undefined {
   const piece = pieceAt(state, from);
   if (!piece) return undefined;
-  const moves = getLegalMovesForPiece(state, piece).filter((m) => coordsEqual(m.to, to));
+  const moves = getLegalMovesForPiece(state, piece).filter((m) =>
+    coordsEqual(m.to, to),
+  );
   if (abilityId !== undefined) {
     return moves.find((m) => m.abilityId === abilityId);
   }

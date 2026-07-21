@@ -19,7 +19,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "bench": "node dist/benchCli.js --compare-legacy"
+    "bench": "node dist/benchCli.js --compare-forgefish --compare-legacy"
   },
   "dependencies": {
     "@chessforge/engine": "workspace:*"

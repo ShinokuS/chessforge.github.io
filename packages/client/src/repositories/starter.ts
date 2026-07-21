@@ -38,6 +38,9 @@ export const STARTER_COLLECTION: OwnedCard[] = [
   { defId: 'juggernaut', count: 1 },
   { defId: 'thornqueen', count: 1 },
   { defId: 'veilqueen', count: 1 },
+  { defId: 'hearteater', count: 1 },
+  { defId: 'reaver', count: 1 },
+  { defId: 'javelin', count: 1 },
   { defId: 'judge', count: 1 },
 ];
 

@@ -1,4 +1,4 @@
-import { hashPosition, type SearchResult } from '@chessforge/ai';
+import { hashPosition, type BotId, type SearchResult } from '@chessforge/ai';
 import type { MatchState } from '@chessforge/engine';
 import { getAiPool } from '../ai/AiWorkerPool';
 import type { EngineLine } from './useAnalysisEngine';
@@ -11,6 +11,7 @@ import {
 import {
   ANALYSIS_DEPTH_SLICE_MS,
   buildAnalysisSearchOptions,
+  DEFAULT_ANALYSIS_BOT_ID,
   defaultAnalysisThreads,
 } from './analysisSettings';
 
@@ -35,6 +36,7 @@ export type FullGameAnalysisOptions = {
   depth?: number;
   /** Parallel workers (= analysis threads). */
   threads?: number;
+  engine?: BotId;
   signal?: AbortSignal;
   onProgress?: (p: FullGameProgress) => void;
 };
@@ -118,7 +120,10 @@ export async function analyzeFullGame(
   if (total === 0) return { analyzed: 0, skipped: 0 };
 
   const pool = getAiPool();
-  const searchOpts = buildAnalysisSearchOptions({ maxDepth: targetDepth });
+  const searchOpts = buildAnalysisSearchOptions({
+    maxDepth: targetDepth,
+    engine: options.engine ?? DEFAULT_ANALYSIS_BOT_ID,
+  });
 
   try {
     await pool.searchPositionQueue(states, searchOpts, {

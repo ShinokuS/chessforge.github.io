@@ -17,14 +17,14 @@ describe('formatEventsToHistory', () => {
   it('keeps one ply for a move + passive cleric heal', () => {
     const state = blank([
       createPieceInstance('cleric', 'white', { x: 4, y: 1 }, 'cw'),
-      createPieceInstance('knight', 'white', { x: 2, y: 2 }, 'nw'),
+      createPieceInstance('knight', 'white', { x: 4, y: 2 }, 'nw'),
       createPieceInstance('king', 'white', { x: 0, y: 0 }, 'kw'),
       createPieceInstance('king', 'black', { x: 4, y: 7 }, 'kb'),
     ]);
     const result = applyCommand(state, {
       type: 'move',
-      from: { x: 2, y: 2 },
-      to: { x: 4, y: 3 },
+      from: { x: 0, y: 0 },
+      to: { x: 0, y: 1 },
     });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -32,8 +32,9 @@ describe('formatEventsToHistory', () => {
     const entries = formatEventsToHistory(result.events, result.state, 1);
     expect(entries.filter((e) => e.kind === 'ply')).toHaveLength(1);
     expect(entries[0]?.player).toBe('white');
-    expect(entries[0]?.text).toMatch(/Конь/);
-    expect(entries[0]?.text).toMatch(/лечение/i);
+    expect(entries[0]?.text).toMatch(/Король/);
+    expect(entries[0]?.text).toMatch(/\+1 HP → Конь \(2 HP\)/);
+    expect(entries[0]?.text).toMatch(/Клерик e2/);
     expect(entries[0]?.turn).toBe(1);
   });
 
@@ -121,7 +122,7 @@ describe('formatEventsToHistory', () => {
     expect(blocks).toHaveLength(1);
     if (blocks[0]?.type !== 'turn') return;
     expect(blocks[0].row.white?.text).toMatch(/Конь/);
-    expect(blocks[0].row.white?.text).not.toBe('Лечение Конь (2 HP)');
+    expect(blocks[0].row.white?.text).not.toBe('+1 HP → Конь (2 HP) · Клерик e2');
     expect(blocks[0].row.black?.text).toMatch(/Пешка/);
   });
 

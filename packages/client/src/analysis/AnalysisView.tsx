@@ -7,6 +7,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
+import { formatBotLabel, getBot } from '@chessforge/ai';
 import {
   listTileDefinitions,
   type Coord,
@@ -120,6 +121,9 @@ export function AnalysisView() {
   const setAnalysisDepth = useAppStore((s) => s.setAnalysisDepth);
   const analysisThreads = useAppStore((s) => s.analysisThreads);
   const setAnalysisThreads = useAppStore((s) => s.setAnalysisThreads);
+  const analysisBotId = useAppStore((s) => s.analysisBotId);
+  const setAnalysisBotId = useAppStore((s) => s.setAnalysisBotId);
+  const analysisBotLabel = formatBotLabel(getBot(analysisBotId).meta);
   const [mode, setMode] = useState<AnalysisMode>('play');
   const [root, setRoot] = useState<AnalysisNode>(() => createRootNode(classicAnalysisBoard()));
   const [path, setPath] = useState<AnalysisPath>([]);
@@ -156,6 +160,7 @@ export function AnalysisView() {
     {
       depth: analysisDepth,
       threads: analysisThreads,
+      botId: analysisBotId,
     },
   );
   const evalTick = engine.lines[0]?.depth ?? 0;
@@ -284,6 +289,7 @@ export function AnalysisView() {
       const result = await analyzeFullGame(root, {
         depth: FULL_GAME_DEPTH,
         threads: analysisThreads,
+        engine: analysisBotId,
         signal: ac.signal,
         onProgress: (p) => {
           if (ac.signal.aborted) return;
@@ -309,7 +315,7 @@ export function AnalysisView() {
         setFullGameProgress(null);
       }
     }
-  }, [root, analysisThreads]);
+  }, [root, analysisThreads, analysisBotId]);
 
   useEffect(() => {
     if (!activeGameId) return;
@@ -705,8 +711,10 @@ export function AnalysisView() {
               {fullGameRunning ? 'Перезапустить анализ…' : 'Анализ партии'}
             </button>
             <AnalysisEngineSettingsButton
+              botId={analysisBotId}
               depth={analysisDepth}
               threads={analysisThreads}
+              onBotChange={setAnalysisBotId}
               onDepthChange={setAnalysisDepth}
               onThreadsChange={setAnalysisThreads}
               disabled={mode === 'edit' || fullGameRunning}
@@ -904,7 +912,7 @@ export function AnalysisView() {
             </div>
 
             <section className={`${styles.panel} ${styles.enginePanel}`}>
-              <h3 className={styles.panelTitle}>Stockfish</h3>
+              <h3 className={styles.panelTitle}>{analysisBotLabel}</h3>
               {!engineOn || mode === 'edit' ? (
                 <p className={styles.muted}>
                   {mode === 'edit'

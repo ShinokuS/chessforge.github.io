@@ -1,5 +1,5 @@
 import { getLegalMoves, type GameCommand, type LegalMove, type MatchState } from '@chessforge/engine';
-import { hashPosition, type ChooseOptions, type SearchResult } from '@chessforge/ai';
+import { getBot, hashPosition, type ChooseOptions, type SearchResult } from '@chessforge/ai';
 import type { WorkerRequest, WorkerResponse } from './search.worker';
 
 const INF = 1_500_000;
@@ -217,16 +217,20 @@ export class AiWorkerPool {
     const nodeLimit = options.nodeLimit ?? 80_000;
     const ttBits = options.ttBits ?? 16;
     const deadline = Date.now() + Math.max(30, timeMs);
+    const bot = getBot(options.engine);
+    const canRootSplit = bot.meta.capabilities.rootSplit;
 
     const requestedWorkers = Math.max(
       1,
       Math.floor(options.workers ?? hardwareWorkers()),
     );
-    const workerCount = resolveWorkerCount(requestedWorkers, rootMoves.length);
+    const workerCount = canRootSplit
+      ? resolveWorkerCount(requestedWorkers, rootMoves.length)
+      : 1;
     this.ensureWorkers(workerCount);
 
-    // Low skill / tiny trees: one worker sync choose is enough.
-    if (workerCount === 1 || maxDepth <= 2 || rootMoves.length <= 2) {
+    // Low skill / tiny trees / bots without rootSplit: one worker sync choose.
+    if (!canRootSplit || workerCount === 1 || maxDepth <= 2 || rootMoves.length <= 2) {
       const res = await this.call(this.workers[0]!, {
         id: this.nextReqId(),
         type: 'choose',
@@ -345,8 +349,7 @@ export class AiWorkerPool {
 
   /**
    * Live analysis search. Preempts any previous analysis (does not wait in the AI queue).
-   * Threads > 1: Lazy SMP — N independent iterative searches (loads cores; UI gets
-   * real depth/nodes/PV from searchStockfish progress callbacks).
+   * Threads > 1 + bot.lazySmp: Lazy SMP — N independent iterative searches.
    */
   async searchPosition(
     state: MatchState,
@@ -354,8 +357,10 @@ export class AiWorkerPool {
     analysis: { onProgress?: (result: SearchResult) => void } = {},
   ): Promise<SearchResult> {
     const requested = Math.max(1, Math.floor(options.workers ?? 1));
+    const bot = getBot(options.engine);
+    const canLazySmp = bot.meta.capabilities.lazySmp;
     // Full searches are not limited by root-move count (unlike root-split battle search).
-    const workerCount = Math.max(1, Math.min(requested, 32));
+    const workerCount = canLazySmp ? Math.max(1, Math.min(requested, 32)) : 1;
 
     if (workerCount <= 1) {
       return this.searchPositionSingle(state, options, analysis);

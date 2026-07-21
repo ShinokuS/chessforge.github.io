@@ -1,5 +1,5 @@
 import type { PlayerId } from '@chessforge/engine';
-import type { ChooseOptions } from '@chessforge/ai';
+import { clampBotId, DEFAULT_BOT_ID, type BotId, type ChooseOptions } from '@chessforge/ai';
 
 /** Discrete level: 0 = weakest, 10 = maximum search power (Lichess-style buttons). */
 export type AiStrengthLevel = number;
@@ -61,7 +61,10 @@ function defaultAiWorkers(): number {
   return Math.max(2, Math.min(8, n));
 }
 
-export function aiChooseOptions(level: number): ChooseOptions {
+export function aiChooseOptions(
+  level: number,
+  botId: BotId = DEFAULT_BOT_ID,
+): ChooseOptions {
   const p = aiSearchProfile(level);
   return {
     maxDepth: p.maxDepth,
@@ -70,7 +73,7 @@ export function aiChooseOptions(level: number): ChooseOptions {
     skill: p.skill,
     ttBits: p.ttBits,
     workers: defaultAiWorkers(),
-    engine: 'stockfish',
+    engine: clampBotId(botId),
   };
 }
 

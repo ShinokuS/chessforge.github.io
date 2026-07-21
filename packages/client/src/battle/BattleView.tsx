@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { getBot, listBots, formatBotLabel } from '@chessforge/ai';
 import styles from './BattleView.module.css';
 import { BoardView } from './BoardView';
 import { formatClock } from './clock';
 import { formatEvalCp, judgmentLabel, type AnalyzedPly, type MoveJudgment } from './analyzeGame';
-import { assignDisplayTurns, groupHistoryForDisplay, historyForViewer, historyCursorInEntry, historyCursorForEntry } from './moveHistory';
+import { assignDisplayTurns, groupHistoryForDisplay, historyForViewer, historyCursorInEntry, historyCursorForEntry, type MoveHistoryEntry } from './moveHistory';
 import {
   aiSearchProfile,
   SIDE_OPTIONS,
@@ -43,11 +44,17 @@ export function BattleView() {
   const saveAndOpenAnalysis = useAppStore((s) => s.saveAndOpenAnalysis);
   const setAnalysisCursor = useAppStore((s) => s.setAnalysisCursor);
   const clearAnalysis = useAppStore((s) => s.clearAnalysis);
+  const liveReviewCursor = useAppStore((s) => s.liveReviewCursor);
+  const liveReviewPositions = useAppStore((s) => s.liveReviewPositions);
+  const setLiveReviewCursor = useAppStore((s) => s.setLiveReviewCursor);
+  const goToLivePosition = useAppStore((s) => s.goToLivePosition);
   const battleMode = useAppStore((s) => s.battleMode);
   const setBattleMode = useAppStore((s) => s.setBattleMode);
   const aiPlaying = useAppStore((s) => s.aiPlaying);
   const aiStrength = useAppStore((s) => s.aiStrength);
   const setAiStrength = useAppStore((s) => s.setAiStrength);
+  const aiBotId = useAppStore((s) => s.aiBotId);
+  const setAiBotId = useAppStore((s) => s.setAiBotId);
   const aiTimePreset = useAppStore((s) => s.aiTimePreset);
   const setAiTimePreset = useAppStore((s) => s.setAiTimePreset);
   const onlineTimePreset = useAppStore((s) => s.onlineTimePreset);
@@ -61,12 +68,45 @@ export function BattleView() {
   const setActiveDeckId = useAppStore((s) => s.setActiveDeckId);
 
   const [, tick] = useState(0);
+  const bots = useMemo(() => listBots(), []);
+  const aiBotLabel = formatBotLabel(getBot(aiBotId).meta);
   useEffect(() => online.subscribeStatus(() => tick((n) => n + 1)), [online]);
 
   useEffect(() => {
     const id = window.setInterval(() => tickClock(), 200);
     return () => window.clearInterval(id);
   }, [tickClock]);
+
+  useEffect(() => {
+    if (analysis.status === 'done') return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target;
+      if (
+        t instanceof HTMLInputElement ||
+        t instanceof HTMLTextAreaElement ||
+        t instanceof HTMLSelectElement
+      ) {
+        return;
+      }
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        const { liveReviewCursor: cur, liveReviewPositions: positions, setLiveReviewCursor: setCur } =
+          useAppStore.getState();
+        if (positions.length <= 1) return;
+        const idx = cur === 'live' ? positions.length - 1 : cur;
+        setCur(idx - 1);
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        const { liveReviewCursor: cur, liveReviewPositions: positions, setLiveReviewCursor: setCur } =
+          useAppStore.getState();
+        if (positions.length <= 1) return;
+        const idx = cur === 'live' ? positions.length - 1 : cur;
+        setCur(idx + 1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [analysis.status]);
 
   useEffect(() => {
     if (analysis.status !== 'done') return;
@@ -137,18 +177,32 @@ export function BattleView() {
   useEffect(() => {
     const el = historyScrollRef.current;
     if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [moveHistory, historyBlocks]);
+    if (liveReviewCursor === 'live') {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [moveHistory, historyBlocks, liveReviewCursor]);
   const activeDeck = decks.find((d) => d.id === activeDeckId) ?? decks[0];
 
   const winnerLabel = (w: 'white' | 'black') => (w === 'white' ? 'белые' : 'чёрные');
-  const reviewing = analysis.status === 'running' || analysis.status === 'done';
+  const reviewingAnalysis = analysis.status === 'running' || analysis.status === 'done';
+  const reviewingLive =
+    !reviewingAnalysis &&
+    liveReviewCursor !== 'live' &&
+    liveReviewPositions.length > 1;
+  const reviewing = reviewingAnalysis || reviewingLive;
+  const liveReplayIndex =
+    liveReviewCursor === 'live'
+      ? Math.max(0, liveReviewPositions.length - 1)
+      : liveReviewCursor;
+  const historyHighlightPly = reviewingLive ? liveReplayIndex : lastPly;
 
-  const status = reviewing
+  const status = reviewingAnalysis
     ? analysis.status === 'running'
       ? `Анализ партии… ${analysis.progress.done}/${analysis.progress.total}`
       : `Анализ · позиция ${analysis.cursor}/${Math.max(0, analysis.positions.length - 1)}`
-    : endBanner
+    : reviewingLive
+      ? `Просмотр · ${liveReplayIndex}/${Math.max(0, liveReviewPositions.length - 1)}`
+      : endBanner
       ? endBanner.kind === 'timeout'
         ? `Время вышло · победа: ${winnerLabel(endBanner.winner)}`
         : endBanner.kind === 'resign'
@@ -188,7 +242,7 @@ export function BattleView() {
     (battleMode === 'online' && (Boolean(endBanner) || state.phase === 'gameOver'));
 
   const showClocks =
-    (battleMode === 'ai' && (aiPlaying || Boolean(endBanner)) && !reviewing) ||
+    (battleMode === 'ai' && (aiPlaying || Boolean(endBanner)) && !reviewingAnalysis) ||
     onlineStatus === 'playing' ||
     (battleMode === 'online' && (Boolean(endBanner) || state.phase === 'gameOver'));
 
@@ -203,6 +257,7 @@ export function BattleView() {
     ? state.pieces.find((p) => p.id === state.extraMovePieceId)
     : undefined;
   const canFinishExtraMove =
+    liveReviewCursor === 'live' &&
     canResign &&
     Boolean(extraMovePiece) &&
     state.activePlayer === extraMovePiece!.owner &&
@@ -359,6 +414,17 @@ export function BattleView() {
             </select>
           </label>
 
+          <label className={styles.lobbyField}>
+            Движок
+            <select value={aiBotId} onChange={(e) => setAiBotId(e.target.value)}>
+              {bots.map((bot) => (
+                <option key={bot.id} value={bot.id} title={bot.description}>
+                  {formatBotLabel(bot)}
+                </option>
+              ))}
+            </select>
+          </label>
+
           <StrengthPicker
             label={`Сила ИИ · ${aiStrength}/10`}
             value={aiStrength}
@@ -382,7 +448,7 @@ export function BattleView() {
           </fieldset>
 
           <p className={styles.lobbyHint}>
-            Вы белые · колода «{activeDeck?.name ?? '—'}» · ИИ {aiStrength}/10 (
+            Вы белые · колода «{activeDeck?.name ?? '—'}» · {aiBotLabel} {aiStrength}/10 (
             {aiSearchProfile(aiStrength).hint}) · {timePresetMs(aiTimePreset) / 60_000} мин
           </p>
 
@@ -526,8 +592,29 @@ export function BattleView() {
               <div className={styles.history} aria-label="История ходов">
                 <div className={styles.historyHead}>
                   <h3 className={styles.historyTitle}>
-                    {reviewing ? 'Анализ' : 'Ходы'}
+                    {reviewingAnalysis ? 'Анализ' : reviewingLive ? 'Просмотр' : 'Ходы'}
                   </h3>
+                  {reviewingLive && (
+                    <div className={styles.analysisNav}>
+                      <button
+                        type="button"
+                        onClick={() => setLiveReviewCursor(liveReplayIndex - 1)}
+                        disabled={liveReplayIndex <= 0}
+                      >
+                        ‹
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setLiveReviewCursor(liveReplayIndex + 1)}
+                        disabled={liveReplayIndex >= liveReviewPositions.length - 1}
+                      >
+                        ›
+                      </button>
+                      <button type="button" onClick={goToLivePosition}>
+                        Текущая
+                      </button>
+                    </div>
+                  )}
                   {analysis.status === 'done' && (
                     <div className={styles.analysisNav}>
                       <button
@@ -652,11 +739,11 @@ export function BattleView() {
                   </>
                 )}
 
-                {!reviewing && historyBlocks.length === 0 && (
+                {!reviewingAnalysis && historyBlocks.length === 0 && (
                   <p className={styles.historyEmpty}>Ходов пока нет</p>
                 )}
 
-                {!reviewing && historyBlocks.length > 0 && (
+                {!reviewingAnalysis && historyBlocks.length > 0 && (
                   <div className={styles.historyScroll} ref={historyScrollRef}>
                     <ol className={styles.historyList}>
                       {historyBlocks.map((block) => {
@@ -674,30 +761,26 @@ export function BattleView() {
                         return (
                           <li key={`t-${row.turn}`} className={styles.historyRow}>
                             <span className={styles.historyIndex}>{row.turn}.</span>
-                            <span
-                              className={[
-                                styles.historyMove,
-                                row.white && historyCursorInEntry(lastPly, row.white)
-                                  ? styles.historyActive
-                                  : '',
-                              ]
-                                .filter(Boolean)
-                                .join(' ')}
-                            >
-                              {row.white?.text ?? ''}
-                            </span>
-                            <span
-                              className={[
-                                styles.historyMove,
-                                row.black && historyCursorInEntry(lastPly, row.black)
-                                  ? styles.historyActive
-                                  : '',
-                              ]
-                                .filter(Boolean)
-                                .join(' ')}
-                            >
-                              {row.black?.text ?? ''}
-                            </span>
+                            <HistoryMoveCell
+                              entry={row.white}
+                              label={row.white?.text}
+                              active={historyCursorInEntry(historyHighlightPly, row.white)}
+                              onClick={() => {
+                                if (row.white) {
+                                  setLiveReviewCursor(historyCursorForEntry(row.white));
+                                }
+                              }}
+                            />
+                            <HistoryMoveCell
+                              entry={row.black}
+                              label={row.black?.text}
+                              active={historyCursorInEntry(historyHighlightPly, row.black)}
+                              onClick={() => {
+                                if (row.black) {
+                                  setLiveReviewCursor(historyCursorForEntry(row.black));
+                                }
+                              }}
+                            />
                           </li>
                         );
                       })}
@@ -803,6 +886,35 @@ export function BattleView() {
         </div>
       )}
     </section>
+  );
+}
+
+function HistoryMoveCell({
+  entry,
+  label,
+  active,
+  onClick,
+}: {
+  entry?: MoveHistoryEntry | undefined;
+  label?: string | undefined;
+  active: boolean;
+  onClick: () => void;
+}) {
+  if (!entry && !label) return <span className={styles.historyMove} />;
+  return (
+    <button
+      type="button"
+      className={[
+        styles.historyMove,
+        styles.analysisMoveBtn,
+        active ? styles.historyActive : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      onClick={onClick}
+    >
+      {label ?? entry?.text ?? ''}
+    </button>
   );
 }
 

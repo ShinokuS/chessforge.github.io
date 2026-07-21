@@ -11,6 +11,7 @@ import {
 } from '@chessforge/engine';
 import boardStyles from '../battle/BoardView.module.css';
 import { PieceIcon } from '../battle/PieceIcon';
+import { PieceStatusMarks } from '../battle/PieceStatusMarks';
 import {
   ABILITY_LABEL,
   actionLabel,
@@ -218,7 +219,10 @@ export function AnalysisBoard({
           data-best-to={isBestTo ? '1' : undefined}
         >
           {piece && (
-            <PieceIcon defId={piece.defId} owner={piece.owner} className={boardStyles.piece} />
+            <>
+              <PieceIcon defId={piece.defId} owner={piece.owner} className={boardStyles.piece} />
+              <PieceStatusMarks piece={piece} />
+            </>
           )}
           {tileId !== 'plain' && (
             <span className={boardStyles.tileMark}>{TILE_MARK[tileId] ?? '·'}</span>

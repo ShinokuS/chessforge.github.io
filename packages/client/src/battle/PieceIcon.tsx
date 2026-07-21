@@ -588,6 +588,54 @@ function Judge({ owner }: { owner: PlayerId }) {
   );
 }
 
+/** Сердцеедка — ферзь с битым сердцем. */
+function Hearteater({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="12" cy="13" r="2.1" />
+      <circle cx="22.5" cy="10" r="2.1" />
+      <circle cx="33" cy="13" r="2.1" />
+      <path d="M12 15.2 14.8 29h15.4L33 15.2 27 22.5 22.5 14 18 22.5z" />
+      <path
+        d="M30 24c0-2 1.5-3.5 3.5-3.5 1.2 0 2 .6 2.4 1.4-.8.3-1.4 1-1.4 2 0 1.4 1.2 2.6 2.8 2.6.3 0 .6 0 .9-.1-.5 1.6-2 2.6-4.2 2.6-2.7 0-4.5-2-4.5-4z"
+        fill="#c62828"
+        stroke={c.stroke}
+        strokeWidth={0.7}
+      />
+      <path d="M14.5 31.5h16l-1.4 3.5h-13.2z" />
+      <path d="M12 38.5h21v3.5H12z" />
+    </Base>
+  );
+}
+
+/** Каратель — слон с двойной кромкой. */
+function Reaver({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <circle cx="22.5" cy="10" r="2.4" />
+      <path d="M22.5 13.5c-4.8 3.2-8 8.2-8 13.2 0 2.2.6 4.1 1.6 5.8h12.8c1-1.7 1.6-3.6 1.6-5.8 0-5-3.2-10-8-13.2z" />
+      <path d="M13 36.5h19l-1.6-4H14.6z" />
+      <path d="M11.5 39h22v3.5h-22z" />
+      <path d="M16 22h13M16 26h13" stroke={c.accent} fill="none" strokeWidth={1.4} strokeLinecap="round" />
+    </Base>
+  );
+}
+
+/** Копьеносец — конь с копьём. */
+function Javelin({ owner }: { owner: PlayerId }) {
+  const c = colors(owner);
+  return (
+    <Base owner={owner}>
+      <path d="M14 38.5h18v3.5H13z" />
+      <path d="M14 33.5h17l-1-4c2-2 3.5-4.5 3.5-7.5 0-4.5-3.5-8-8-8-2 0-3.5.5-5 1.2L15 12v5l2 1c-1 1.2-1.5 2.6-1.5 4.2 0 1.4.4 2.7 1.1 3.8L13.5 30c-.5 1-.7 2-.6 3z" />
+      <circle cx="21" cy="19" r="1.1" fill={c.stroke} stroke="none" />
+      <path d="M31 8v18M31 8l-3 3M31 8l3 3" stroke={c.accent} fill="none" strokeWidth={1.6} strokeLinecap="round" />
+    </Base>
+  );
+}
+
 const ICONS: Record<string, (props: { owner: PlayerId }) => ReactElement> = {
   pawn: Pawn,
   skirmisher: Skirmisher,
@@ -625,7 +673,10 @@ const ICONS: Record<string, (props: { owner: PlayerId }) => ReactElement> = {
   juggernaut: Juggernaut,
   thornqueen: Thornqueen,
   veilqueen: Veilqueen,
+  hearteater: Hearteater,
   judge: Judge,
+  reaver: Reaver,
+  javelin: Javelin,
 };
 
 export function PieceIcon({ defId, owner, className }: PieceIconProps) {

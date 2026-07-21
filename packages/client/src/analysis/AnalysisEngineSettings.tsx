@@ -1,23 +1,27 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { listBots, formatBotLabel, type BotId } from '@chessforge/ai';
 import {
   ANALYSIS_DEPTH_OPTIONS,
-  ANALYSIS_ENGINE_LABEL,
   type AnalysisDepth,
   type AnalysisThreads,
 } from './analysisSettings';
 import styles from './AnalysisEngineSettings.module.css';
 
 type Props = {
+  botId: BotId;
   depth: AnalysisDepth;
   threads: AnalysisThreads;
+  onBotChange: (botId: BotId) => void;
   onDepthChange: (depth: AnalysisDepth) => void;
   onThreadsChange: (threads: AnalysisThreads) => void;
   disabled?: boolean;
 };
 
 export function AnalysisEngineSettingsButton({
+  botId,
   depth,
   threads,
+  onBotChange,
   onDepthChange,
   onThreadsChange,
   disabled,
@@ -25,6 +29,7 @@ export function AnalysisEngineSettingsButton({
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const bots = useMemo(() => listBots(), []);
 
   useEffect(() => {
     if (!open) return;
@@ -62,8 +67,16 @@ export function AnalysisEngineSettingsButton({
 
           <label className={styles.row}>
             <span>Движок</span>
-            <select className={styles.control} value="stockfish" disabled>
-              <option value="stockfish">{ANALYSIS_ENGINE_LABEL}</option>
+            <select
+              className={styles.control}
+              value={botId}
+              onChange={(e) => onBotChange(e.target.value)}
+            >
+              {bots.map((bot) => (
+                <option key={bot.id} value={bot.id} title={bot.description}>
+                  {formatBotLabel(bot)}
+                </option>
+              ))}
             </select>
           </label>
 

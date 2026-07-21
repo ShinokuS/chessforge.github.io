@@ -21,6 +21,7 @@ try {
     nodeLimit: value(argv, '--nodes', 300_000),
     ttBits: value(argv, '--tt-bits', 18),
     compareLegacy: argv.includes('--compare-legacy'),
+    compareForgefish: argv.includes('--compare-forgefish') || argv.includes('--compare'),
   });
   console.log(argv.includes('--json') ? JSON.stringify(rows, null, 2) : renderBench(rows));
 } catch (error) {
